@@ -1,0 +1,25 @@
+experiment_name: "simclr_cifar100"
+
+method_type: "simclr"
+
+dataset:
+  name: "cifar"
+  path: "./data/"
+
+training:
+  batch_size: 64
+  num_epochs: 100
+  lr: 0.5
+  save_every: 10
+  augmentations_type: "cifar"
+  augment_both: True
+
+model:
+  encoder_type: "resnet50"
+  pretrained: False
+  width_multiplier: 4.0
+  hidden_dim: 2048
+  projection_dim: 128
+
+loss:
+  temperature: 0.5
