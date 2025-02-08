@@ -9,7 +9,7 @@ class SimCLR_Projector(nn.Module):
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, projection_dim)
-        )
+        ) # we do not have any activation function after the last layer
 
     def forward(self, X):
         return self.projector(X)

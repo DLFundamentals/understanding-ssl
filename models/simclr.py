@@ -20,7 +20,7 @@ class SimCLR(nn.Module):
         with torch.no_grad():
             if dataset == 'imagenet':
                 h = self.encoder(torch.randn(1, 3, 224, 224))
-            elif dataset == 'cifar':
+            elif dataset == 'cifar' or 'cifar' in dataset:
                 h = self.encoder(torch.randn(1, 3, 32, 32))
             else:
                 raise NotImplementedError(f"{dataset} not implemented")
@@ -32,7 +32,7 @@ class SimCLR(nn.Module):
     def forward(self, X):
   
         h = self.encoder(X)
-        h = h.view(h.size(0), -1)
+        h = h.view(h.size(0), -1) # flatten the tensor
         g_h = self.projector(h)
 
         return h, F.normalize(g_h, dim = -1)

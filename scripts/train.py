@@ -23,33 +23,9 @@ from tqdm import tqdm
 torch.manual_seed(123)
 torch.cuda.manual_seed(123)
 
-def augment_batch(images, 
-                  train_transforms, 
-                  basic_transforms, 
-                  augment_both=False,
-                  device='cuda'):
-    """Augments a batch of images."""
-    if isinstance(images, torch.Tensor):
-        # convert Tensor to PIL Image
-        images = [transforms.ToPILImage()(image) for image in images]
-
-    # get transformed view1
-    view1_images = [train_transforms(image) for image in images]
-    view1_images = torch.stack(view1_images)
-
-    # get transformed view2
-    if augment_both:
-        view2_images = [train_transforms(image) for image in images]
-        view2_images = torch.stack(view2_images)
-    else:
-        view2_images = [basic_transforms(image) for image in images]
-        view2_images = torch.stack(view2_images)
-
-    return view1_images.to(device), view2_images.to(device)
-
 
 # ========== Training Function ==========
-def train(model, train_loader, train_transforms, basic_transforms,
+def train(model, train_loader,
           criterion, optimizer, num_epochs, augment_both = False,
           save_every=50, experiment_name="simclr/cifar10",
           device='cuda'):
@@ -59,21 +35,21 @@ def train(model, train_loader, train_transforms, basic_transforms,
         model.train()
         running_loss = 0.0
 
-        for images, _ in tqdm(train_loader):
-            # Augment the batch
-            view1_images, view2_images = augment_batch(images, \
-                                                        train_transforms, \
-                                                        basic_transforms, \
-                                                        augment_both=augment_both, \
-                                                        device=device)
+        for batch in tqdm(train_loader):
+            view1_images, view2_images = batch
+            # Skip batches with only 1 image, could be the last batch
+            if len(view1_images) < 2:
+                continue
+
+            # Move to device
+            view1_images = view1_images.to(device)
+            view2_images = view2_images.to(device)
             
             # Forward Pass
             view1_features, view1_projections = model(view1_images)
             view2_features, view2_projections = model(view2_images)
 
             # Compute contrastive loss
-            if len(images) < 10:
-                breakpoint()
             loss = criterion(view1_projections, view2_projections)
 
             # Backprop
@@ -127,13 +103,14 @@ if __name__ == "__main__":
 
     # set device
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
+    
     # load dataset
     _, train_loader = get_dataset(dataset_name=dataset_name, 
-                                dataset_path=dataset_path, 
+                                dataset_path=dataset_path,
+                                augment_both_views=augment_both,
                                 batch_size=batch_size,)
     
-    train_transforms, basic_transforms = get_transforms(dataset=augmentations_type)
+    # train_transforms, basic_transforms = get_transforms(dataset=augmentations_type)
 
     # define model
     if encoder_type == 'resnet50':
@@ -157,6 +134,6 @@ if __name__ == "__main__":
     optimizer = optim.Adam(ssl_model.parameters(), lr=lr) # replace with LARS for large batch sizes
 
     # train model
-    train(ssl_model, train_loader, train_transforms, basic_transforms,
+    train(ssl_model, train_loader,
           criterion, optimizer, epochs, augment_both=True, 
           save_every=save_every, device=device)

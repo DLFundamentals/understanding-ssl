@@ -1,9 +1,9 @@
-experiment_name: "simclr_cifar100"
+experiment_name: "simclr/cifar10"
 
 method_type: "simclr"
 
 dataset:
-  name: "cifar"
+  name: "cifar10"
   path: "./data/"
 
 training:
@@ -17,7 +17,7 @@ training:
 model:
   encoder_type: "resnet50"
   pretrained: False
-  width_multiplier: 4.0
+  width_multiplier: 4
   hidden_dim: 2048
   projection_dim: 128
 

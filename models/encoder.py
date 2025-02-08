@@ -91,7 +91,7 @@ class ResNetEncoder(BaseEncoder):
             assert not pretrained, 'pretrained weights not available for wider ResNet'
 
         self.create_wider_resnet()
-        if dataset == 'cifar':
+        if dataset == 'cifar' or 'cifar' in dataset:
             self.modify_for_cifar()
 
         # for SSL, we do not need the final fc layer
