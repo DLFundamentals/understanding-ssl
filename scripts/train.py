@@ -24,54 +24,6 @@ torch.manual_seed(123)
 torch.cuda.manual_seed(123)
 
 
-# ========== Training Function ==========
-def train(model, train_loader,
-          criterion, optimizer, num_epochs, augment_both = False,
-          save_every=50, experiment_name="simclr/cifar10",
-          device='cuda'):
-    """Runs the training loop for self-supervised learning models."""
-    print("Training Started!")
-    for epoch in range(num_epochs):
-        model.train()
-        running_loss = 0.0
-
-        for batch in tqdm(train_loader):
-            view1_images, view2_images = batch
-            # Skip batches with only 1 image, could be the last batch
-            if len(view1_images) < 2:
-                continue
-
-            # Move to device
-            view1_images = view1_images.to(device)
-            view2_images = view2_images.to(device)
-            
-            # Forward Pass
-            view1_features, view1_projections = model(view1_images)
-            view2_features, view2_projections = model(view2_images)
-
-            # Compute contrastive loss
-            loss = criterion(view1_projections, view2_projections)
-
-            # Backprop
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            running_loss += loss.item()
-
-        avg_loss = running_loss / len(train_loader)
-        print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {avg_loss:.4f}")
-
-        # Save Model & Logs
-        if (epoch + 1) % save_every == 0:
-            checkpoint_path = f"experiments/{experiment_name}/checkpoints/epoch_{epoch+1}.pth"
-            os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
-            torch.save(model.state_dict(), checkpoint_path)
-            print(f"Checkpoint saved: {checkpoint_path}")
-
-    print("Training Complete! 🎉")
-
-
 if __name__ == "__main__":
     # parse arguments
     parser = argparse.ArgumentParser(description='SimCLR Training')

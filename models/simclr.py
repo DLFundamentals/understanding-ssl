@@ -40,6 +40,7 @@ class SimCLR(nn.Module):
 
         return h, F.normalize(g_h, dim = -1)
     
+    # ========== Training Function ==========
     def custom_train(self, train_loader,
               criterion, optimizer, num_epochs, 
               augment_both = True,

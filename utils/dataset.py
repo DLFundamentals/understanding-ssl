@@ -21,7 +21,6 @@ class SimCLRDataset(Dataset):
     
     def __getitem__(self, idx):
         
-        # breakpoint()
         image, label = self.dataset[idx]
         view1 = self.train_transforms(image)
         if self.augment_both_views:
