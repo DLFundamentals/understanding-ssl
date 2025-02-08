@@ -5,6 +5,9 @@ import torch.nn.functional as F
 from models.encoder import BaseEncoder, ResNetEncoder
 from models.projector import SimCLR_Projector
 
+import os
+from tqdm import tqdm
+
 class SimCLR(nn.Module):
     def __init__(self, model, layer = -2, dataset = 'imagenet',
                  width_multiplier = 1, pretrained = False,
@@ -36,3 +39,51 @@ class SimCLR(nn.Module):
         g_h = self.projector(h)
 
         return h, F.normalize(g_h, dim = -1)
+    
+    def custom_train(self, train_loader,
+              criterion, optimizer, num_epochs, 
+              augment_both = True,
+              save_every = 10, experiment_name = 'simclr/cifar10',
+              device = 'cuda'):
+        
+        self.to(device) # move model to device
+        print(f"Training on {device} started! Experiment name: {experiment_name}")
+
+        for epoch in range(num_epochs):
+            self.train()
+            running_loss = 0.0
+
+            for batch in tqdm(train_loader):
+                
+                # get the inputs
+                view1, view2 = batch
+                # skip the batch with only 1 image
+                if view1.size(0) < 2:
+                    continue
+                view1, view2 = view1.to(device), view2.to(device)
+
+                # forward pass
+                view1_features, view1_proj = self(view1)
+                view2_features, view2_proj = self(view2)
+
+                # compute contrastive loss
+                loss = criterion(view1_proj, view2_proj)
+
+                # backprop
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                running_loss += loss.item()
+
+            avg_loss = running_loss / len(train_loader)
+            print(f"Epoch {epoch + 1}/{num_epochs} Loss: {avg_loss:.4f}")
+
+            # Save Model & Logs
+            if (epoch + 1) % save_every == 0:
+                checkpoint_path = f"experiments/{experiment_name}/checkpoints/epoch_{epoch+1}.pth"
+                os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
+                torch.save(self.state_dict(), checkpoint_path)
+                print(f"Checkpoint saved: {checkpoint_path}")
+
+        print("Training Complete! 🎉")

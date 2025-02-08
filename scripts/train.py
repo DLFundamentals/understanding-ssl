@@ -82,6 +82,8 @@ if __name__ == "__main__":
     with open(args.config, 'r') as file:
         config = yaml.safe_load(file)
 
+    # load config parameters
+    experiment_name = config['experiment_name']
     method_type = config['method_type']
 
     dataset_name = config['dataset']['name']
@@ -134,6 +136,11 @@ if __name__ == "__main__":
     optimizer = optim.Adam(ssl_model.parameters(), lr=lr) # replace with LARS for large batch sizes
 
     # train model
-    train(ssl_model, train_loader,
-          criterion, optimizer, epochs, augment_both=True, 
-          save_every=save_every, device=device)
+    ssl_model.custom_train(train_loader=train_loader,
+                    criterion=criterion,
+                    optimizer=optimizer,
+                    num_epochs=epochs,
+                    augment_both=augment_both,
+                    save_every=save_every,
+                    experiment_name=experiment_name,
+                    device=device)
