@@ -47,6 +47,9 @@ if __name__ == "__main__":
     augmentations_type = config['training']['augmentations_type'] # imagenet or cifar or other dataset name
     augment_both = config['training']['augment_both']
     save_every = config['training']['save_every']
+    track_performance = config['training']['track_performance']
+    K = config['evaluation']['K'] if track_performance else None
+
 
     encoder_type = config['model']['encoder_type']
     width_multiplier = config['model']['width_multiplier']
@@ -77,7 +80,9 @@ if __name__ == "__main__":
                            dataset=dataset_name,
                            width_multiplier=width_multiplier,
                            hidden_dim=hidden_dim,
-                           projection_dim=projection_dim)
+                           projection_dim=projection_dim,
+                           track_performance=track_performance,
+                            K=K)
     else:
         raise NotImplementedError(f"{method_type} not implemented")
     
@@ -95,4 +100,4 @@ if __name__ == "__main__":
                     augment_both=augment_both,
                     save_every=save_every,
                     experiment_name=experiment_name,
-                    device=device)
+                    device=device,)

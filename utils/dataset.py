@@ -28,6 +28,6 @@ class SimCLRDataset(Dataset):
         else:
             view2 = self.basic_transforms(image)
             
-        return view1, view2
+        return view1, view2, label
 
 

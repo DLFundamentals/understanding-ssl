@@ -7,19 +7,23 @@ dataset:
   path: "./data/"
 
 training:
-  batch_size: 64
+  batch_size: 512
   num_epochs: 100
-  lr: 0.5
+  lr: 0.03
   save_every: 10
   augmentations_type: "cifar"
   augment_both: True
+  track_performance: True
 
 model:
   encoder_type: "resnet50"
   pretrained: False
-  width_multiplier: 4
+  width_multiplier: 2
   hidden_dim: 2048
   projection_dim: 128
 
 loss:
-  temperature: 0.5
+  temperature: 0.1
+
+evaluation:
+  K: [5, 10, 20]
