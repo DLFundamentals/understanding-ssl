@@ -3,10 +3,12 @@ import torch.optim as optim
 import torchvision
 import torchvision.models as models
 import torchvision.transforms as transforms
+from torchlars import LARS
 
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 # utils
 from utils.augmentations import get_transforms
 from utils.dataset_loader import get_dataset
@@ -90,7 +92,11 @@ if __name__ == "__main__":
 
     # define loss & optimizer
     criterion = NTXentLoss(batch_size, temperature, device)
-    optimizer = optim.Adam(ssl_model.parameters(), lr=lr) # replace with LARS for large batch sizes
+    # optimizer = optim.Adam(ssl_model.parameters(), lr=lr) # replace with LARS for large batch sizes
+
+    # ========= LARS optimizer =========
+    base_optimizer = optim.SGD(ssl_model.parameters(), lr=lr, momentum=0.9)
+    optimizer = LARS(optimizer=base_optimizer, eps=1e-8, trust_coef=0.001)
 
     # train model
     ssl_model.custom_train(train_loader=train_loader,
