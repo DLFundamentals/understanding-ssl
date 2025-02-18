@@ -17,7 +17,7 @@ from utils.losses import NTXentLoss
 # model
 from models.simclr import SimCLR
 
-import argparse
+import argparse   
 import yaml
 from tqdm import tqdm
 
