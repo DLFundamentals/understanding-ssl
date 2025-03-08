@@ -6,9 +6,11 @@ from models.encoder import BaseEncoder, ResNetEncoder
 from models.projector import SimCLR_Projector
 
 from utils.metrics import KNN
+from utils.analysis import cal_cdnv, embedding_performance_nearest_mean_classifier
 
 import os
 from tqdm import tqdm
+from collections import defaultdict
 
 class SimCLR(nn.Module):
     def __init__(self, model, layer = -2, dataset = 'imagenet',
@@ -102,12 +104,52 @@ class SimCLR(nn.Module):
         print("Training Complete! 🎉")
 
     # ========== Evaluation Function ==========
-    def custom_eval(self, train_loader, test_loader=None):
-        # Evaluate KNN
-        knn_evaluator = KNN(self, self.K)
-        train_acc, test_acc = knn_evaluator.knn_eval(train_loader, test_loader)
+    def custom_eval(self, train_loader, test_loader=None, 
+                    **kwargs):
+        self.eval()
+        print("Evaluation Started!")
 
-        # print(f"KNN Evaluation: Train Acc: {train_acc:.2f}%")
-        # if test_acc:
-        #     print(f"KNN Evaluation: Test Acc: {test_acc:.2f}%")
+        perform_knn = kwargs.get('perform_knn', False)
+        perform_cdnv = kwargs.get('perform_cdnv', False)
+        perform_nccc = kwargs.get('perform_nccc', False)
+        settings = kwargs.get('settings', None)
+
+        outputs = defaultdict(list)
+
+        if perform_knn:
+            # Evaluate KNN
+            knn_evaluator = KNN(self, self.K)
+            train_acc, test_acc = knn_evaluator.knn_eval(train_loader, test_loader)
+            outputs['knn_train_acc'].append(train_acc)
+            outputs['knn_test_acc'].append(test_acc)
+
+        if perform_cdnv:
+            # Evaluate CDN-V
+            cdnvs = cal_cdnv(self, settings, train_loader)
+            outputs['cdnv'] = cdnvs
+
+        if perform_nccc:
+            # Evaluate NCCC
+            nccc = embedding_performance_nearest_mean_classifier(self, settings, train_loader)
+            outputs['nccc'] = nccc
+            
         # print("Evaluation Complete! 🎉")
+        return outputs
+
+    # ========== Run One Batch =================
+    def run_one_batch(self, batch, criterion, optimizer, device):
+        # get the inputs
+        view1, view2, _ = batch
+        # skip the batch with only 1 image
+        if view1.size(0) < 2:
+            return 0
+        view1, view2 = view1.to(device), view2.to(device)
+
+        # forward pass
+        view1_features, view1_proj = self(view1)
+        view2_features, view2_proj = self(view2)
+
+        # compute contrastive loss
+        loss = criterion(view1_proj, view2_proj)
+
+        return loss

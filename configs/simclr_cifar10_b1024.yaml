@@ -1,0 +1,38 @@
+experiment_name: "simclr/cifar10"
+
+method_type: "simclr"
+
+dataset:
+  name: "cifar10"
+  path: "./data/"
+  num_output_classes: 10
+
+training:
+  batch_size: 1024
+  num_epochs: 1000
+  lr: 0.3
+  augmentations_type: "cifar"
+  augment_both: True
+  save_every: 10
+  track_performance: True
+  multi_gpu: True
+  world_size: 2
+
+model:
+  encoder_type: "resnet50"
+  pretrained: False
+  width_multiplier: 2
+  hidden_dim: 2048
+  projection_dim: 64
+
+loss:
+  temperature: 0.5
+
+evaluation:
+  K: [5, 10, 20]
+  checkpoints_dir: "experiments/simclr/cifar10/checkpoints/"
+  perform_knn: False
+  perform_cdnv: True
+  perform_nccc: True
+  perform_linear: False
+  perform_tsne: False

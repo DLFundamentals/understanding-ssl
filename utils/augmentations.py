@@ -22,10 +22,14 @@ def get_transforms(dataset = 'imagenet'):
 
     elif dataset == 'cifar' or 'cifar' in dataset:
         s = 0.5
+        color_jitter = transforms.ColorJitter(
+            0.8 * s, 0.8 * s, 0.8 * s, 0.2 * s
+        )
         train_transform = transforms.Compose([
             transforms.RandomResizedCrop(32),
             transforms.RandomHorizontalFlip(),
-            transforms.ColorJitter(brightness=0.8*s, contrast=0.8*s, saturation=0.8*s, hue=0.2*s),
+            transforms.RandomApply([color_jitter], p=0.8),
+            transforms.RandomGrayscale(p=0.2),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010]),
         ])
