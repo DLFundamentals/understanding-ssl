@@ -86,6 +86,7 @@ class ResNetEncoder(BaseEncoder):
         # self.resnet = models.resnet50(pretrained = pretrained)
         # self.resnet = model
         self.width_multiplier = int(width_multiplier)
+        self.pretrained = pretrained
 
         if self.width_multiplier != 1:
             assert not pretrained, 'pretrained weights not available for wider ResNet'
@@ -106,6 +107,12 @@ class ResNetEncoder(BaseEncoder):
         # modify the first conv layer
         self.net.conv1 = nn.Conv2d(3, 64 * self.width_multiplier, kernel_size = 7, stride = 2, padding = 3, bias = False)
         self.net.bn1 = nn.BatchNorm2d(64 * self.width_multiplier)
+        
+        if not self.pretrained:
+            # ✅ Reinitialize weights
+            self._initialize_weights(self.net.conv1)
+            self._initialize_weights(self.net.bn1)
+        
 
         # modify the subsequent layers
         for layer in [self.net.layer1, self.net.layer2, self.net.layer3, self.net.layer4]:
@@ -139,10 +146,9 @@ class ResNetEncoder(BaseEncoder):
                                  padding = padding,
                                  bias = bias)
         
-        # # ✅ Reinitialize weights
-        # nn.init.kaiming_normal_(widened_conv.weight, mode='fan_out', nonlinearity='relu')
-        # if widened_conv.bias is not None:
-        #     nn.init.zeros_(widened_conv.bias)
+        if not self.pretrained:
+            # ✅ Reinitialize weights
+            self._initialize_weights(widened_conv)
         
         # delete conv to save memory
         del conv
@@ -156,3 +162,16 @@ class ResNetEncoder(BaseEncoder):
 
         # remove the first max pooling operation
         self.net.maxpool = nn.Identity()
+
+    def _initialize_weights(self, layer: Union[nn.Conv2d, nn.BatchNorm2d]) -> None:
+
+        # ✅ Reinitialize weights
+        if isinstance(layer, nn.Conv2d):
+            nn.init.kaiming_normal_(layer.weight, mode='fan_out', nonlinearity='relu')
+            if layer.bias is not None:
+                nn.init.zeros_(layer.bias)
+        elif isinstance(layer, nn.BatchNorm2d):
+            nn.init.ones_(layer.weight)
+            nn.init.zeros_(layer.bias)
+        elif isinstance(layer, nn.Linear):
+            nn.init.normal_(layer.weight, 0, 0.01)

@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from torch.amp import autocast
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import train_test_split, cross_val_score
 
@@ -23,7 +24,9 @@ class KNN:
             for batch in tqdm(loader):
                 _, x, label = batch
                 x = x.to(self.device)
-                h, z = self.model(x)
+                with autocast(device_type='cuda'):
+                    # forward pass
+                    _, z = self.model(x)
 
                 # store features to cpu
                 features.append(z.cpu())
@@ -40,6 +43,11 @@ class KNN:
         features_np = z_train.numpy()
         labels_np = y_train.numpy()
 
+        # look for NAN values
+        if np.isnan(features_np).any():
+            print("NaN values found in features. Replacing with 0")
+            features_np = np.nan_to_num(features_np)
+            
         if isinstance(self.k, int):
             knn = KNeighborsClassifier(n_neighbors = self.k, metric="cosine").fit(features_np, labels_np)
             train_acc = 100 * np.mean(cross_val_score(knn, features_np, labels_np, cv=5))

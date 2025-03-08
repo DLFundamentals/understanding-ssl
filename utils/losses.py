@@ -1,14 +1,15 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.distributed as dist
+import diffdist
+from utils.gather import GatherLayer
 
 class NTXentLoss(nn.Module):
-    def __init__(self, batch_size, temperature=0.5, device="cuda"):
+    def __init__(self, temperature=0.5, device="cuda"):
         super().__init__()
-        self.batch_size = batch_size
         self.temperature = temperature
         self.device = device
-        self.mask = self.mask_correlated_samples(batch_size)
         self.criterion = nn.CrossEntropyLoss(reduction="sum")
         self.similarity_f = nn.CosineSimilarity(dim=2)
 
@@ -25,25 +26,40 @@ class NTXentLoss(nn.Module):
         return mask
 
     def forward(self, z_i, z_j):
-
-        N = 2 * self.batch_size
-        z = torch.cat((z_i, z_j), dim=0) # concatenate the two batches (two views) for a total of 2N samples
-
-        # Compute the NxN similarity matrix
-        sim = self.similarity_f(z.unsqueeze(1), # N x 1 x D
-                                z.unsqueeze(0)  # 1 x N x D
-                                ) / self.temperature 
+        # distributed version
+        if dist.is_initialized():
+            z_i = torch.cat(GatherLayer.apply(z_i), dim=0)
+            z_j = torch.cat(GatherLayer.apply(z_j), dim=0)
         
+        z = torch.cat([z_i, z_j], dim=0)
+        
+        N = z.size(0)
+        self.batch_size = N // 2
+        # Mask correlated samples (positive and self pairs)
+        self.mask = self.mask_correlated_samples(self.batch_size)
+
+        # Compute the NxN similarity matrix (cosine similarity)
+        sim = self.similarity_f(z.unsqueeze(1), z.unsqueeze(0)) / self.temperature
+
+        # Extract the positive samples
         sim_i_j = torch.diag(sim, self.batch_size)
         sim_j_i = torch.diag(sim, -self.batch_size)
 
+        # Concatenate positive samples (for each view i and j)
         positive_samples = torch.cat((sim_i_j, sim_j_i), dim=0).reshape(N, 1)
-        negative_samples = sim[self.mask].reshape(N, -1) # N x (N-2)
 
+        # Extract negative samples by masking out the positive pairs
+        negative_samples = sim[self.mask].reshape(N, -1)  # Masking positive pairs
+
+        # Labels for cross-entropy loss (all zeros for correct classification)
         labels = torch.zeros(N).to(positive_samples.device).long()
-        logits = torch.cat((positive_samples, negative_samples), dim=1) # N x N-1
+
+        # Concatenate positive and negative samples for logits
+        logits = torch.cat((positive_samples, negative_samples), dim=1)  # N x (N-1)
+
+        # Calculate the loss using cross-entropy
         loss = self.criterion(logits, labels)
-        loss /= N
+        loss /= N  # Normalize by batch size
 
         return loss
 
