@@ -5,6 +5,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import train_test_split, cross_val_score
 
 from tqdm import tqdm
+from typing import List, Tuple
 
 # =================1️⃣ KNN Evaluation =================
 class KNN:
@@ -83,3 +84,178 @@ class KNN:
                     test_acc.append(test_acc_k)
 
             return train_acc, test_acc
+
+
+# =================2️⃣ NCCC Evaluation =================
+class NCCCEval:
+    """
+    perform NCCC evaluation in a normal or few-shot setting
+    - calculate class-center using N data points per class
+    - calculate NCCC score for each class
+    - calucate accuracy rates
+    - perform this for 'repeat' number of times
+    """
+    def __init__(self, train_loader, output_classes=10 , device='cuda'):
+        self.train_loader = train_loader
+        self.output_classes = output_classes
+        self.device = device
+    
+
+    def evaluate(self, model: torch.nn.Module, 
+                 test_loader: torch.utils.data.DataLoader, 
+                 n_samples:int = None, repeat:int =5,
+                 embedding_layer:List[int] = [0,1]):
+        """
+        Args:
+            N (int, required only for few-shot setting): Number of data points per class to calculate class centers.
+            repeat (int, optional): Number of times to repeat the evaluation. Defaults to 5.
+            embedding_layer (List[int], optional): List of embedding layers to use. Defaults to [-1].
+    
+        """
+        model.eval()
+
+        batch = next(iter(self.train_loader))
+        _, x, y = batch
+        x = x.to(self.device)
+        y = y.to(self.device)
+
+        # get the embedding layer
+        h, g_h = model(x)
+        embeddings = [h, g_h]
+
+        # select the embedding layer
+        embeddings = [embeddings[i] for i in embedding_layer]
+        num_embs = len(embeddings)
+        emb_dims = []
+        for emb in embeddings:
+            emb = emb.view(emb.shape[0], -1)
+            emb_dims.append(emb.shape[1])
+        
+
+        # repeat the evaluation for 'repeat' number of times
+        accs = []
+        for _ in range(repeat):
+            # calculate class centers
+            means = self.fit(model, n_samples, num_embs, emb_dims, embedding_layer)
+
+            # calculate NCCC score
+            acc = self.calculate_nccc_score(num_embs, model, means, test_loader, embedding_layer)
+            accs.append(acc)
+
+        # calculate average accuracy
+        avg_accs = [sum([accs[i][j] for i in range(repeat)]) / repeat for j in range(num_embs)]
+
+        return avg_accs
+    
+
+    def fit(self, model, n_samples,
+            num_embs, emb_dims, embedding_layer,):
+        """
+        fit the NCCC model
+        - calculate class centers using N data points per class
+        - store class centers
+        """
+        assert num_embs == len(embedding_layer)
+        N = [self.output_classes * [0] for _ in range(num_embs)] # tracks number of samples per class
+
+        means = []
+        for i in range(num_embs):
+            means += [torch.zeros(self.output_classes, emb_dims[i]).to(self.device)]
+
+        with torch.no_grad():
+            for batch in self.train_loader:
+                _, x, y = batch
+                x = x.to(self.device)
+                y = y.to(self.device)
+
+                if n_samples is not None:
+                    # select indxs for inputs based on N and output_classes
+                    final_mask = self.get_batch_idx_mask(y, n_samples, N)
+                    x = x[final_mask]
+                    y = y[final_mask]
+                
+                # non-empty x
+                if x.shape[0] == 0:
+                    continue
+
+                # get the embeddings
+                h, g_h = model(x)
+                embeddings = [h, g_h]
+
+                for i in embedding_layer:
+                    emb = embeddings[i].view(embeddings[i].shape[0], -1)
+                    
+                    for c in range(self.output_classes):
+                        idxs = y == c
+                        if len(idxs) == 0:
+                            continue
+
+                        h_c = emb[idxs]
+                        means[i][c] += torch.sum(h_c, dim=0)
+                        N[i][c] += h_c.shape[0]
+
+        # calculate the means
+        for i in range(num_embs):
+            for c in range(self.output_classes):
+                means[i][c] /= N[i][c]
+
+        return means
+         
+    def get_batch_idx_mask(self, y, n_samples, N):
+        final_mask = torch.zeros_like(y, dtype=torch.bool)  # Use boolean mask for indexing
+        for c in range(self.output_classes):
+            mask = (y == c).nonzero(as_tuple=True)[0]  # Indices where class == c
+
+            if N[0][c] >= n_samples:  # If we already have enough, skip
+                continue
+
+            n_remaining = n_samples - N[0][c]
+            available_samples = mask.shape[0]
+
+            if available_samples > 0:
+                # If we have more than needed, randomly select `n_remaining ± small variation`
+                if available_samples >= n_remaining:
+                    random_offset = torch.randint(-2, 3, (1,)).item()  # Small variation of ±2
+                    num_to_take = max(1, min(n_remaining + random_offset, available_samples))
+                else:
+                    num_to_take = available_samples  # Take whatever is available
+
+                selected_indices = mask[torch.randperm(available_samples)[:num_to_take]]
+                final_mask[selected_indices] = True
+                N[0][c] += num_to_take  # Update count
+
+        return final_mask
+
+    
+    @torch.no_grad()
+    def calculate_nccc_score(self, num_embs, model, means, test_loader, embedding_layer):
+        """
+        calculate NCCC score
+        """
+        corrects = num_embs * [0.0]
+
+        for batch in tqdm(test_loader):
+            _, x, y = batch
+            x = x.to(self.device)
+            y = y.to(self.device)
+
+            h, g_h = model(x)
+            embeddings = [h, g_h]
+
+            for i in embedding_layer:
+                emb = embeddings[i].view(embeddings[i].shape[0], -1)
+                emb = emb.detach()
+
+                # calculate the distance
+                dist = torch.cdist(emb.unsqueeze(0), means[i].unsqueeze(0)).squeeze(0)
+                preds = torch.argmin(dist, dim=1)
+                corrects[i] += torch.sum(preds == y).item()
+
+        dataset_size = len(test_loader.dataset)
+        accs = [corrects[i] / dataset_size for i in range(num_embs)]
+
+        return accs
+                
+        
+
+# =================3️⃣ CDNV Evaluation =================
