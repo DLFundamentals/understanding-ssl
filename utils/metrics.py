@@ -6,6 +6,7 @@ from sklearn.model_selection import train_test_split, cross_val_score
 
 from tqdm import tqdm
 from typing import List, Tuple
+from collections import defaultdict
 
 # =================1️⃣ KNN Evaluation =================
 class KNN:
@@ -258,4 +259,53 @@ class NCCCEval:
                 
         
 
-# =================3️⃣ CDNV Evaluation =================
+# ================= 3️⃣ CDNV Evaluation =================
+
+
+# ================= 4️⃣ Anisotropy Evaluation =================
+@torch.no_grad()
+def anisotropy(model, loader, 
+               output_classes=10, embedding_layer=1,
+               device='cuda'):
+    """
+    Calculate the anisotropy of the data:
+
+                    anisotropy = λ_max / max(λ_min, ε)
+
+    where λmax, λmin are the max/min eigenvalues of the covariance matrix of the data
+    """
+    model.eval()
+    inputs = defaultdict(list)
+    for batch in loader:
+        _, x, y = batch
+        h, g_h = model(x.to(device))
+        embeddings = [h, g_h]
+
+        # store the inputs class-wise
+        for i in range(output_classes):
+            idxs = y == i
+            if torch.sum(idxs) == 0:
+                continue
+            inputs[i].append(embeddings[embedding_layer][idxs])
+
+    anisotropies = []
+
+    for i in range(output_classes):
+        if len(inputs[i]) == 0:
+            anisotropies.append(float('nan'))  # Handle missing classes properly
+            continue
+
+        # Concatenate embeddings for class i
+        class_embeddings = torch.cat(inputs[i], dim=0)  # Shape: (N, D)
+
+        # Compute covariance matrix (D, D)
+        cov_matrix = torch.cov(class_embeddings.T)
+
+        # Compute eigenvalues
+        eigvals = torch.linalg.eigvalsh(cov_matrix)
+
+        # Compute anisotropy ratio with numerical stability
+        anisotropy_value = eigvals[-1] / max(eigvals[0], 1e-6)
+        anisotropies.append(anisotropy_value)
+
+    return anisotropies
