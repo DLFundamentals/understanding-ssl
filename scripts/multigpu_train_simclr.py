@@ -32,7 +32,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # utils
 from utils.augmentations import get_transforms
 from utils.dataset_loader import get_dataset
-from utils.losses import NTXentLoss
+from utils.losses import NTXentLoss, WeakNTXentLoss
 from utils.optimizer import LARS
 
 # model
@@ -51,10 +51,12 @@ from collections import namedtuple
 def ddp_setup():
     local_rank = int(os.environ.get("LOCAL_RANK"))
     world_size = int(os.environ.get("WORLD_SIZE"))
+    # rank = int(os.environ.get("RANK"))
     torch.cuda.set_device(local_rank)
     dist.init_process_group(backend="nccl", 
                             world_size=world_size, 
                             rank=local_rank)
+    
 
 def cleanup():
   dist.destroy_process_group()
@@ -66,7 +68,8 @@ class Trainer:
             train_loader: torch.utils.data.DataLoader,
             criterion: torch.nn.Module,
             save_every: int,
-            snapshot_path: str,
+            log_every: int,
+            snapshot_dir: str,
             **kwargs,
     ) -> None:
         
@@ -77,13 +80,15 @@ class Trainer:
         self.gpu_id = int(os.environ["LOCAL_RANK"])
         self.model = model.to(f'cuda:{self.gpu_id}')
         self.train_loader = train_loader
+        self.test_loader = kwargs.get("test_loader", None)
         self.criterion = criterion
         self.save_every = save_every
+        self.log_every = log_every
         self.epochs_run = 0
-        self.snapshot_path = snapshot_path
-        if os.path.exists(self.snapshot_path):
-            self._load_snapshot(self.snapshot_path)
-            print(f"Loaded model from {self.snapshot_path}")
+        self.snapshot_dir = snapshot_dir
+        if os.path.exists(self.snapshot_dir):
+            self._load_snapshot(self.snapshot_dir)
+            print(f"Loaded model from {self.snapshot_dir}")
 
         self.model = DDP(self.model, device_ids=[self.gpu_id], find_unused_parameters=True)
 
@@ -91,9 +96,9 @@ class Trainer:
         effective_lr = kwargs.get("effective_lr", 0.1)
         total_epochs = kwargs.get("total_epochs", 100)
         self.optimizer, self.scheduler = self.configure_optimizers(self.model, effective_lr, total_epochs)
-        if os.path.exists(self.snapshot_path):
-            self._load_optimizer_scheduler(self.snapshot_path)
-            print(f"Loaded optimizer and scheduler from {self.snapshot_path}")
+        if os.path.exists(self.snapshot_dir):
+            self._load_optimizer_scheduler(self.snapshot_dir)
+            print(f"Loaded optimizer and scheduler from {self.snapshot_dir}")
 
         self.track_performance = kwargs.get("track_performance", False)
         self.settings = kwargs.get("settings", None)
@@ -104,33 +109,55 @@ class Trainer:
 
         # mixed precision training
         self.scaler = GradScaler()
+
+        # support weak NTXentloss as well
+        self.supervision = kwargs.get("supervision", "SSL")
     
-    def _load_snapshot(self, snapshot_path: str) -> None:
+    def _load_snapshot(self, snapshot_dir: str) -> None:
         loc = f"cuda:{self.gpu_id}"
+        # load the latest snapshot
+        dir_list = os.listdir(snapshot_dir)
+        if len(dir_list) == 0:
+            print("No snapshots found!")
+            return
+        latest_snapshot = sorted(dir_list, reverse=True)[0]
+        snapshot_path = os.path.join(snapshot_dir, latest_snapshot)
+
         snapshot = torch.load(snapshot_path, map_location=loc)
         self.model.load_state_dict(snapshot["MODEL_STATE"])
         self.epochs_run = snapshot["EPOCHS_RUN"]
         print(f"Resume training from snapshot at epoch {self.epochs_run}")
 
-    def _load_optimizer_scheduler(self, snapshot_path: str) -> None:
+    def _load_optimizer_scheduler(self, snapshot_dir: str) -> None:
         loc = f"cuda:{self.gpu_id}"
+        # load the latest snapshot
+        dir_list = os.listdir(snapshot_dir)
+        if len(dir_list) == 0:
+            print("No snapshots found!")
+            return
+        latest_snapshot = sorted(dir_list, reverse=True)[0]
+        snapshot_path = os.path.join(snapshot_dir, latest_snapshot)
+
         snapshot = torch.load(snapshot_path, map_location=loc)
         self.optimizer.load_state_dict(snapshot["OPTIMIZER"])
         self.scheduler.load_state_dict(snapshot["SCHEDULER"])
     
-    def _save_snapshot(self, snapshot_path: str, epoch: int) -> None:
+    def _save_snapshot(self, snapshot_dir: str, epoch: int) -> None:
         snapshot = {
             "MODEL_STATE": self.model.module.state_dict(),
             "EPOCHS_RUN": epoch,
             "OPTIMIZER": self.optimizer.state_dict(),
             "SCHEDULER": self.scheduler.state_dict()
         }
+        os.makedirs(snapshot_dir, exist_ok=True)
+        snapshot_path = os.path.join(snapshot_dir, f"snapshot_{epoch}.pth")
         torch.save(snapshot, snapshot_path)
         print(f"Saved model to {snapshot_path} at epoch {epoch}")
 
     def _run_epoch(self, epoch: int) -> None:
         print(f"[GPU {self.gpu_id}] Training epoch {epoch}...")
-        self.train_loader.sampler.set_epoch(epoch)
+        if isinstance(self.train_loader.sampler, DistributedSampler):
+            self.train_loader.sampler.set_epoch(epoch)
 
         loss_per_epoch = 0.0
         for batch in tqdm(self.train_loader):
@@ -145,7 +172,7 @@ class Trainer:
             
             # backward + update using gradscaler
             self.scaler.scale(loss).backward()
-            torch.cuda.synchronize()
+            # torch.cuda.synchronize()
             self.scaler.unscale_(self.optimizer)  # Unscale gradients before clipping
             #clip model gradients
             # clip_grad_norm_(self.model.parameters(), max_norm=1.0)
@@ -158,27 +185,48 @@ class Trainer:
         # update learning rate
         self.scheduler.step()
 
-        return loss_per_epoch
+        return loss_per_epoch / len(self.train_loader)
             
 
     def train(self, max_epochs: int) -> None:
         self.model.train()
+        loss_per_epoch = 0.0
+        # if self.epochs_run + 100 >= max_epochs:
+        #     return
         for epoch in range(self.epochs_run, max_epochs):
-            loss_per_epoch = self._run_epoch(epoch)
-            if self.gpu_id == 0 and (epoch) % self.save_every == 0:
-                self._save_snapshot(self.snapshot_path, epoch)
-                print(f"Saved model at epoch {epoch}")
-                if self.track_performance:
-                    self.model.eval()
-                    eval_outputs = self.model.module.custom_eval(self.train_loader, 
-                                                                 settings=self.settings,
-                                                                 perform_knn = self.perform_knn,
-                                                                 perform_cdnv = self.perform_cdnv,
-                                                                 perform_nccc = self.perform_nccc)
 
-                    # log performance metrics
-                    self.log_metrics(eval_outputs, epoch, loss_per_epoch)
-                    self.model.train()
+            loss_per_epoch = self._run_epoch(epoch)
+
+            # On GPU 0 do extra logging, snapshot saving, and evaluation
+            if self.gpu_id == 0:
+                # Save a snapshot
+                if epoch % self.log_every == 0:
+                    self._save_snapshot(self.snapshot_dir, epoch)
+                    print(f"Saved model at epoch {epoch}")
+
+                # Evaluate and log performance every self.save_every epochs
+                if epoch % self.save_every == 0:
+                    print(f"Loss per epoch: {loss_per_epoch}")
+                    if self.track_performance:
+                        # Switch to eval mode and run evaluation with no_grad
+                        self.model.eval()
+                        with torch.no_grad():
+                            eval_outputs = self.model.module.custom_eval(
+                                                            self.test_loader,
+                                                            settings=self.settings,
+                                                            perform_knn=self.perform_knn,
+                                                            perform_cdnv=self.perform_cdnv,
+                                                            perform_nccc=self.perform_nccc
+                                                        )
+                        # Log the performance metrics
+                        self.log_metrics(eval_outputs, epoch, loss_per_epoch)
+                        # Return the model to training mode
+                        self.model.train()
+
+                # Optionally, if using distributed training, you might call a barrier here:
+                if dist.get_world_size() > 1:
+                    dist.barrier()
+
         print("Training complete! 🎉")
 
     def configure_optimizers(self, ssl_model, effective_lr,
@@ -261,6 +309,7 @@ if __name__ == "__main__":
     # load config parameters
     experiment_name = config['experiment_name']
     method_type = config['method_type']
+    supervision = config['supervision']
 
     dataset_name = config['dataset']['name']
     dataset_path = config['dataset']['path']
@@ -272,6 +321,7 @@ if __name__ == "__main__":
     augmentations_type = config['training']['augmentations_type'] # imagenet or cifar or other dataset name
     augment_both = config['training']['augment_both']
     save_every = config['training']['save_every']
+    log_every = config['training']['log_every']
     # save_model = config['training']['save_model']
     track_performance = config['training']['track_performance']
     multi_gpu = config['training']['multi_gpu']
@@ -289,6 +339,7 @@ if __name__ == "__main__":
     perform_cdnv = config['evaluation']['perform_cdnv']
     perform_nccc = config['evaluation']['perform_nccc']
     perform_tsne = config['evaluation']['perform_tsne']
+    checkpoints_dir = config['evaluation']['checkpoints_dir']
 
     # set device
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -300,8 +351,9 @@ if __name__ == "__main__":
 
     # initialize distributed training
     ddp_setup()
+    print(f"Local rank: {os.environ.get('LOCAL_RANK')}, World size: {os.environ.get('WORLD_SIZE')}")
 
-    if dist.get_rank() == 0:
+    if dist.get_rank() == 0 and track_performance:
         # wandb init
         wandb.init(
             project = "simclr",
@@ -323,20 +375,18 @@ if __name__ == "__main__":
     
     # load dataset
     world_size = int(os.environ.get('WORLD_SIZE'))
-    _, train_loader = get_dataset(dataset_name=dataset_name, 
+    print(f"Dataset: {dataset_name}")
+    _, train_loader, _, test_loader = get_dataset(dataset_name=dataset_name, 
                                     dataset_path=dataset_path,
                                     augment_both_views=augment_both,
                                     batch_size=batch_size, multi_gpu=multi_gpu,
-                                    world_size=world_size)
-    
-    _, val_loader = get_dataset(dataset_name=dataset_name,
-                                dataset_path=dataset_path,
-                                augment_both_views=False,
-                                batch_size=batch_size)
+                                    world_size=world_size, supervision=supervision,
+                                    test=True)
+
 
     # define model
     if encoder_type == 'resnet50':
-        encoder = torchvision.models.resnet50(pretrained=False)
+        encoder = torchvision.models.resnet50(weights=None)
     else:
         raise NotImplementedError(f"{encoder_type} not implemented")
     
@@ -356,20 +406,28 @@ if __name__ == "__main__":
     dist.barrier() # wait for all processes to catch up
 
     # define loss & optimizer
-    criterion = NTXentLoss(temperature, device) 
+    if supervision == 'SSL':
+        print("Using Self-Supervised Contrastive Learning")
+        criterion = NTXentLoss(temperature, device) 
+    elif supervision == 'SCL':
+        print("Using Weakly-Supervised Contrastive Learning")
+        criterion = WeakNTXentLoss(temperature, device)
+    else:
+        raise NotImplementedError(f"{supervision} not implemented")
 
     # train model
 
     effective_lr = lr*world_size*(batch_size//256)
+    # effective_lr = lr * 2.0 * (batch_size // 256)
     trainer = Trainer(
         model=ssl_model,
         train_loader=train_loader,
-        # optimizer=optimizer,
+        test_loader=test_loader,
         criterion=criterion,
         save_every=save_every,
-        snapshot_path=f"./experiments/{experiment_name}/snapshot.pth",
+        log_every=log_every,
+        snapshot_dir=checkpoints_dir,
         track_performance=track_performance,
-        # scheduler=scheduler,
         effective_lr = effective_lr,
         settings = settings,
         perform_knn = perform_knn,
