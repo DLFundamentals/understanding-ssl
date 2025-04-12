@@ -39,9 +39,11 @@ if __name__ == "__main__":
     # load config parameters
     experiment_name = config['experiment_name']
     method_type = config['method_type']
+    supervision = config['supervision']
 
     dataset_name = config['dataset']['name']
     dataset_path = config['dataset']['path']
+    num_output_path_classes = config['dataset']['num_output_classes']
     
     batch_size = config['training']['batch_size']
     epochs = config['training']['num_epochs']
@@ -50,7 +52,8 @@ if __name__ == "__main__":
     augment_both = config['training']['augment_both']
     save_every = config['training']['save_every']
     track_performance = config['training']['track_performance']
-    K = config['evaluation']['K'] if track_performance else None
+    multi_gpu = config['training']['multi_gpu']
+    world_size = config['training']['world_size']
 
 
     encoder_type = config['model']['encoder_type']
@@ -60,6 +63,14 @@ if __name__ == "__main__":
 
     temperature = config['loss']['temperature']
 
+    K = config['evaluation']['K'] if track_performance else None
+    checkpoints_dir = config['evaluation']['checkpoints_dir']
+    perform_knn = config['evaluation']['perform_knn']
+    perform_cdnv = config['evaluation']['perform_cdnv']
+    perform_nccc = config['evaluation']['perform_nccc']
+    perform_linear = config['evaluation']['perform_linear']
+    perform_tsne = config['evaluation']['perform_tsne']
+
     # set device
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
@@ -67,9 +78,7 @@ if __name__ == "__main__":
     _, train_loader = get_dataset(dataset_name=dataset_name, 
                                 dataset_path=dataset_path,
                                 augment_both_views=augment_both,
-                                batch_size=batch_size,)
-    
-    # train_transforms, basic_transforms = get_transforms(dataset=augmentations_type)
+                                batch_size=batch_size, supervision=supervision)
 
     # define model
     if encoder_type == 'resnet50':

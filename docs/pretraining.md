@@ -6,7 +6,15 @@ Ensure you have all the necessary dependencies installed:
 pip install -r requirements.txt
 ```
 
-## Run Distributed Training
+## Training on Single GPU
+
+Run the following command to train SimCLR on single GPU.
+
+```bash
+python scripts/train.py --config <path-to-yaml-config>
+```
+
+## Distributed Training on Multiple GPUs
 
 Run the following command to train SimCLR on multiple GPUs.
 
@@ -21,8 +29,8 @@ The YAML configuration file should look something like this:
 
 ```yaml
 experiment_name: "simclr/cifar10"
-
 method_type: "simclr"
+supervision: "SSL"
 
 dataset:
   name: "cifar10"
@@ -35,7 +43,8 @@ training:
   lr: 0.3
   augmentations_type: "cifar"
   augment_both: True
-  save_every: 10
+  save_every: 100
+  log_every: 10
   track_performance: True
   multi_gpu: True
   world_size: 2
