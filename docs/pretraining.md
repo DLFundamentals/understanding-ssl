@@ -1,7 +1,9 @@
 # SSL Pretraining
 
 ## Installation
+
 Ensure you have all the necessary dependencies installed:
+
  ```bash
 pip install -r requirements.txt
 ```
@@ -25,6 +27,7 @@ torchrun --nproc_per_node=N_GPUs --standalone scripts/multigpu_train_simclr.py -
 Replace `N_GPUs` with the number of GPUs you want to use and `<path-to-yaml-config>` with the path to your configuration file.
 
 ## Configuration File
+
 The YAML configuration file should look something like this:
 
 ```yaml
@@ -74,7 +77,7 @@ evaluation:
 - **Dataset**: Defines dataset path and number of classes.
 - **Training**: Specifies batch size, epochs, learning rate, and augmentation strategy. The augmentation strategies can be defined at `utils/augmentations.py`
 - **Model**: Determines encoder type, width multiplier, and projection head dimensions.
-- **Loss**: Defines contrastive loss temperature. Set `$\tau = 0.5$` for CIFAR and `$\tau = 0.1` for Imagenet 
+- **Loss**: Defines contrastive loss temperature. Set `$\tau = 0.5$` for CIFAR and `$\tau = 0.1` for Imagenet
 - **Evaluation**: Sets evaluation methods and checkpoint directory.
 
 Modify these settings based on your specific requirements. Happy pretraining! ðŸš€
@@ -85,7 +88,7 @@ Modify these settings based on your specific requirements. Happy pretraining! ðŸ
 
 In this section, we present the results of multiple experiments conducted with different hyperparameter configurations. We evaluate the models using several metrics: CDNV (Contrastive Distance Norm Validation), NCCC (Normalized Cross-Correlation), Training Accuracy, and Test Accuracy. All experiments were conducted with a common set of training configurations unless specified otherwise.
 
-Below are the results for the experiments conducted with different hyperparameter settings. Training and Test Accuracies are reported after Linear Probing experiments. 
+Below are the results for the experiments conducted with different hyperparameter settings. Training and Test Accuracies are reported after Linear Probing experiments.
 
 | Batch Size | LR  | GPUs | Projection Dim | Augmentation   | CDNV | NCCC | Training Acc. | Test Acc. |
 |---|---|---|---|---|---|---|---|---|
