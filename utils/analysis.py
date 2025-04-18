@@ -96,7 +96,7 @@ def embedding_performance(model, settings, train_loader, test_loader=None):
 
     # init the optimizer
     # optimizer = optim.SGD(params, lr=settings.top_lr, momentum=settings.momentum, weight_decay=settings.weight_decay)
-    optimizer = optim.Adam(params, lr=settings.top_lr)
+    optimizer = optim.Adam(params, lr=settings.top_lr, weight_decay=settings.weight_decay)
 
     # train phase
     wandb_defined = False
@@ -125,6 +125,7 @@ def embedding_performance(model, settings, train_loader, test_loader=None):
             train_accuracy_rates, train_losses = test(settings, num_embs, model, linear_projs, train_loader)
             test_accuracy_rates, test_losses = test(settings, num_embs, model, linear_projs, test_loader)
             print(f"Train accuracy: {train_accuracy_rates}")
+            print(f"Test accuracy: {test_accuracy_rates}")
             log_metrics(train_accuracy_rates, train_losses, i, wandb_defined)
             log_metrics_test(test_accuracy_rates, test_losses, i, wandb_defined)
             wandb_defined = True
@@ -150,7 +151,6 @@ def log_metrics(acc_rates, losses, epoch, wandb_defined=False):
         log_data[f"train_accuracy_{i}"] = acc_rates[i]
         log_data[f"lin_prob_loss_{i}"] = losses[i]
 
-
     wandb.log(log_data)
     
 def log_metrics_test(acc_rates, losses, epoch, wandb_defined=False):
@@ -168,7 +168,6 @@ def log_metrics_test(acc_rates, losses, epoch, wandb_defined=False):
     for i in range(num_embs):
         log_data[f"test_accuracy_{i}"] = acc_rates[i]
         log_data[f"test_lin_prob_loss_{i}"] = losses[i]
-
 
     wandb.log(log_data)
 
@@ -288,3 +287,48 @@ def test_nearest_mean(settings, num_embs, model, means, test_loader):
     accuracy_rates = [corrects[i] / dataset_size for i in range(num_embs)]
 
     return accuracy_rates
+
+def load_snapshot(snapshot_path, model, device):
+    snapshot = torch.load(snapshot_path, map_location=device, weights_only=True)
+    state_dict = snapshot['MODEL_STATE']
+    epochs_trained = snapshot['EPOCHS_RUN']
+    print(f"Loaded model from epoch {epochs_trained}")
+    model.load_state_dict(state_dict)
+    model = model.to(device)
+    model.eval()
+    print("SSL Model loaded successfully")
+    return model
+
+def get_ssl_minus_scl_loss(ssl_model, loader, ssl_criterion, weak_scl_criterion,
+                           device='cuda'):
+    ssl_model.eval()
+    with torch.no_grad():
+        total_ssl_loss = 0.0
+        total_scl_loss = 0.0
+        for batch in tqdm(loader):
+
+            view1, view2, labels = batch
+            view1 = view1.to(device)
+            view2 = view2.to(device)
+            labels = labels.to(device)
+
+            # forward pass
+            view1_features, view1_proj = ssl_model(view1)
+            view2_features, view2_proj = ssl_model(view2)
+
+            # calculate ssl loss
+            ssl_loss = ssl_criterion(view1_proj, view2_proj, labels)
+            total_ssl_loss += ssl_loss.item()
+
+            # calculate weak scl loss
+            weak_scl_loss = weak_scl_criterion(view1_proj, view2_proj, labels)
+            total_scl_loss += weak_scl_loss.item()
+
+        torch.cuda.empty_cache()
+
+        print(f"Total SSL Loss: {total_ssl_loss/len(loader)}")
+        print(f"Total Weak SCL Loss: {total_scl_loss/len(loader)}")
+
+    diff = total_ssl_loss - total_scl_loss
+
+    return diff/len(loader), total_ssl_loss/len(loader), total_scl_loss/len(loader)
