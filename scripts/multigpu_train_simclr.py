@@ -32,7 +32,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # utils
 from utils.augmentations import get_transforms
 from utils.dataset_loader import get_dataset
-from utils.losses import NTXentLoss, WeakNTXentLoss
+from utils.losses import NTXentLoss, WeakNTXentLoss, ContrastiveLoss
 from utils.optimizer import LARS
 
 # model
@@ -46,6 +46,7 @@ from collections import namedtuple
 # # set seed
 # torch.manual_seed(123)
 # torch.cuda.manual_seed(123)
+torch.backends.cudnn.benchmark = True
 
 # initialize distributed training
 def ddp_setup():
@@ -86,9 +87,9 @@ class Trainer:
         self.log_every = log_every
         self.epochs_run = 0
         self.snapshot_dir = snapshot_dir
-        if os.path.exists(self.snapshot_dir):
-            self._load_snapshot(self.snapshot_dir)
-            print(f"Loaded model from {self.snapshot_dir}")
+        # if os.path.exists(self.snapshot_dir):
+        #     self._load_snapshot(self.snapshot_dir)
+        #     print(f"Loaded model from {self.snapshot_dir}")
 
         self.model = DDP(self.model, device_ids=[self.gpu_id], find_unused_parameters=True)
 
@@ -96,9 +97,9 @@ class Trainer:
         effective_lr = kwargs.get("effective_lr", 0.1)
         total_epochs = kwargs.get("total_epochs", 100)
         self.optimizer, self.scheduler = self.configure_optimizers(self.model, effective_lr, total_epochs)
-        if os.path.exists(self.snapshot_dir):
-            self._load_optimizer_scheduler(self.snapshot_dir)
-            print(f"Loaded optimizer and scheduler from {self.snapshot_dir}")
+        # if os.path.exists(self.snapshot_dir):
+        #     self._load_optimizer_scheduler(self.snapshot_dir)
+        #     print(f"Loaded optimizer and scheduler from {self.snapshot_dir}")
 
         self.track_performance = kwargs.get("track_performance", False)
         self.settings = kwargs.get("settings", None)
@@ -175,7 +176,7 @@ class Trainer:
             # torch.cuda.synchronize()
             self.scaler.unscale_(self.optimizer)  # Unscale gradients before clipping
             #clip model gradients
-            # clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.scaler.step(self.optimizer)         
             self.scaler.update()
             torch.cuda.synchronize()
@@ -200,12 +201,12 @@ class Trainer:
             # On GPU 0 do extra logging, snapshot saving, and evaluation
             if self.gpu_id == 0:
                 # Save a snapshot
-                if epoch % self.log_every == 0:
+                if epoch % self.save_every == 0:
                     self._save_snapshot(self.snapshot_dir, epoch)
                     print(f"Saved model at epoch {epoch}")
 
                 # Evaluate and log performance every self.save_every epochs
-                if epoch % self.save_every == 0:
+                if epoch % self.log_every == 0:
                     print(f"Loss per epoch: {loss_per_epoch}")
                     if self.track_performance:
                         # Switch to eval mode and run evaluation with no_grad
@@ -223,9 +224,9 @@ class Trainer:
                         # Return the model to training mode
                         self.model.train()
 
-                # Optionally, if using distributed training, you might call a barrier here:
-                if dist.get_world_size() > 1:
-                    dist.barrier()
+            # Optionally, if using distributed training, you might call a barrier here:
+            if dist.get_world_size() > 1:
+                dist.barrier()
 
         print("Training complete! 🎉")
 
@@ -376,6 +377,7 @@ if __name__ == "__main__":
     # load dataset
     world_size = int(os.environ.get('WORLD_SIZE'))
     print(f"Dataset: {dataset_name}")
+
     _, train_loader, _, test_loader = get_dataset(dataset_name=dataset_name, 
                                     dataset_path=dataset_path,
                                     augment_both_views=augment_both,
@@ -412,12 +414,16 @@ if __name__ == "__main__":
     elif supervision == 'SCL':
         print("Using Weakly-Supervised Contrastive Learning")
         criterion = WeakNTXentLoss(temperature, device)
+    elif supervision == 'CL':
+        print("Using Contrastive Learning")
+        criterion = ContrastiveLoss(temperature, device)
     else:
         raise NotImplementedError(f"{supervision} not implemented")
 
     # train model
 
     effective_lr = lr*world_size*(batch_size//256)
+    # breakpoint()
     # effective_lr = lr * 2.0 * (batch_size // 256)
     trainer = Trainer(
         model=ssl_model,
