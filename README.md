@@ -1,17 +1,23 @@
 # Understanding SSL
 
+Instructions on how to pretrain, linear probe, and evaluate can be found in `./docs/`
+
 In the following section, we have defined the code directory structure for easily understanding our work and reproducing our experiments:
 
 ```text
 understanding-ssl/
 | —— configs/                            # Config files for different algorithms and datasets
-|    | —— byol.yaml                          
+|    | —— moco.yaml                          
 |    | —— datasets.yaml
 |    | —— simclr.yaml
 | —— data/
 |    | —— cifar10/
+| —— docs/
+| —— | —— / evaluation.md
+| —— | —— / linear_probing.md
+| —— | —— / pretraining.md
 | —— experiments/                        # Experiments directory 
-|    | —— byol/
+|    | —— moco/
 |    |    | —— logs/
 |    |    | —— checkpoints/
 |    |    | —— visualizations/
@@ -21,12 +27,12 @@ understanding-ssl/
 |    |    | —— visualizations/
 | —— models/                           
 |    | —— base_encoder.py               # Backbones (ResNet50, ViT, etc.)
-|    | —— byol.py                       # BYOL-specifc model
+|    | —— moco.py                       # moco-specifc model
 |    | —— projector.py                  # Projection head
 |    | —— simclr.py                     # SimCLR-specific model
 | —— notebooks/                         # Jupyter notebooks for random experiments
 |    | —— simclr.ipynb
-|    | —— byol.ipynb
+|    | —— moco.ipynb
 | —— scripts/                        
 |    | —— evaluate.py
 |    | —— train.py
