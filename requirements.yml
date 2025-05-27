@@ -1,0 +1,24 @@
+name: contrastive
+channels:
+    - conda-forge
+dependencies:
+    - python=3.10
+    - pip
+    - numpy
+    - scipy
+    - matplotlib
+    - seaborn
+    - jupyter
+    - tqdm
+    - pip:
+        - datasets==3.5.0
+        - diffdist==0.1
+        - huggingface_hub==0.29.3
+        - transformers==4.31.0
+        - torch
+        - torchvision
+        - PyYAML
+        - umap-learn
+        - dill
+        - wandb
+        - requests
