@@ -2,11 +2,8 @@
 
 In our work, we make progress towards addressing the following question:
 
-```
-  How does self-supervsied CL learn representations similar to supervised learning, despite lacking explicit supervision?
-  </strong>
-```
-
+> How does self-supervsied CL learn representations similar to supervised learning,
+> despite lacking explicit supervision?
 
 Instructions on how to pretrain, linear probe, and evaluate can be found in `./docs/`
 
