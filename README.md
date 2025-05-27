@@ -1,4 +1,13 @@
-# Understanding SSL
+# Self-Supervised Contrastive Learning is Approximately Supervised Contrastive Learning
+
+In our work, we make progress towards addressing the following question:
+
+<div style="background-color:rgb(130, 64, 244); padding:10px; border-left:5px solid rgb(65, 15, 182);">
+  <strong> 
+  How does self-supervsied CL learn representations similar to supervised learning, despite lacking explicit supervision?
+  </strong>
+</div>
+
 
 Instructions on how to pretrain, linear probe, and evaluate can be found in `./docs/`
 
