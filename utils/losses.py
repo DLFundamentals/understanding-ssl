@@ -6,6 +6,9 @@ import diffdist
 from utils.gather import GatherLayer
 
 class NTXentLoss(nn.Module):
+    """
+    Implementation of the NT-Xent loss function used in SimCLR
+    """
     def __init__(self, temperature=0.5, device="cuda"):
         super().__init__()
         self.temperature = temperature
@@ -21,8 +24,6 @@ class NTXentLoss(nn.Module):
             mask[i, batch_size + i] = 0 # mask the positive pair
             mask[batch_size + i, i] = 0
 
-        # register the mask as a buffer
-        self.register_buffer("mask", mask)
         return mask
 
     def forward(self, z_i, z_j, labels):
@@ -64,6 +65,10 @@ class NTXentLoss(nn.Module):
         return loss
     
 class WeakNTXentLoss(nn.Module):
+    """
+    Implementation of the negatives-only supervised contrastive loss function
+    proposed in our work. 
+    """
     def __init__(self, temperature=0.5, device="cuda"):
         super().__init__()
         self.temperature = temperature
@@ -88,13 +93,10 @@ class WeakNTXentLoss(nn.Module):
             mask[i, batch_size + i] = 0
             mask[batch_size + i, i] = 0
 
-        # # register the mask as a buffer
-        # self.register_buffer("mask", mask)
         return mask
 
     def forward(self, z_i, z_j, labels):
         
-        # breakpoint()
         # distributed version
         if dist.is_initialized():
             z_i = torch.cat(GatherLayer.apply(z_i), dim=0)
@@ -138,9 +140,6 @@ class WeakNTXentLoss(nn.Module):
             F.pad(neg, (0, max_negatives - len(neg)), value=-float("inf")) for neg in negative_samples_list
         ])
 
-        # Extract negative samples by masking out the positive pairs
-        # negative_samples = sim[self.mask].reshape(N, -1)  # Masking positive pairs
-
         # Labels for cross-entropy loss (all zeros for correct classification)
         labels_hack = torch.zeros(N).to(positive_samples.device).long()
 
@@ -149,8 +148,6 @@ class WeakNTXentLoss(nn.Module):
 
         # check for NaN values before calculating loss
         if torch.isnan(logits).any():
-
-            breakpoint()
             print("NaN values detected in logits")
             print("NaN values in positive samples:", torch.isnan(positive_samples).any())
             print("NaN values in negative samples:", torch.isnan(negative_samples_padded).any())
@@ -162,32 +159,7 @@ class WeakNTXentLoss(nn.Module):
         loss = self.criterion(logits, labels_hack)
         loss /= N  # Normalize by batch size
 
-        # loss = self.infoNCE_loss(positive_samples, negative_samples_list)
-
         return loss
-    
-    def infoNCE_loss(self, positive_samples, negative_samples):
-        N = positive_samples.size(0)
-        # Compute log-softmax in a loop
-        log_softmax_all = []
-        for i in range(N):
-            negatives = negative_samples[i]
-
-            # numberical stability: subtract max(logits) before exponentiating
-            logits = negatives
-            logits_max = torch.max(logits)
-            exp_logits = torch.exp(logits - logits_max)
-
-            # softmax denominator
-            sum_exp_logits = torch.sum(exp_logits)
-
-            # log of softmax
-            log_softmax = (positive_samples[i] - logits_max) - torch.log(sum_exp_logits)
-            log_softmax_all.append(log_softmax)
-
-        # stack the log-softmax for all samples
-        log_softmax_all = torch.stack(log_softmax_all).mean() # 1/N * sum(log_softmax)
-        return -log_softmax_all
 
 class ContrastiveLoss(nn.Module):
     def __init__(self, temperature=0.5, device="cuda"):
