@@ -19,7 +19,7 @@ We characterize the geometric structure of the global minimizers of the NSCL los
 
 Finally, we empirically validate our theoretical findings: the gap between CL and NSCL losses decays at a rate of $\mathcal{O}(\frac{1}{\text{classes}})$; the two losses are highly correlated; minimizing the CL loss implicitly brings the NSCL loss close to the value achieved by direct minimization; and the proposed few-shot error bound provides a tight estimate of probing performance in practice.
 
-## Instructions
+## Installation
 
 To get started, follow these steps:
 
@@ -35,7 +35,36 @@ conda env create -f requirements.yml
 conda activate contrastive
 ```
 
-We provide documentation for [pretraining](https://github.com/DLFundamentals/understanding-ssl/blob/main/docs/pretraining.md) SSL models, [linear probing](https://github.com/DLFundamentals/understanding-ssl/blob/main/docs/linear_probing.md) pretrained encoders, and [evaluation](https://github.com/DLFundamentals/understanding-ssl/blob/main/docs/evaluation.md) scripts used for reproducing experiments shown in our paper.
+## Pretraining SSL models
+
+### Training on Single GPU
+
+Run the following command to train SimCLR on single GPU.
+
+```bash
+python scripts/train.py --config <path-to-yaml-config>
+```
+
+### Distributed Training on Multiple GPUs
+
+Run the following command to train SimCLR on multiple GPUs.
+> **NOTE:** In our experiments, we used 2 GPUs for training. You can adjust the number of GPUs based on your hadrware setup.
+
+```bash
+torchrun --nproc_per_node=N_GPUs --standalone scripts/multigpu_train_simclr.py --config <path-to-yaml-config>
+```
+
+Replace `N_GPUs` with the number of GPUs you want to use and `<path-to-yaml-config>` with the path to your configuration file.
+
+Please refer to [docs/pretraining](https://github.com/DLFundamentals/understanding-ssl/blob/main/docs/pretraining.md) for more details.
+
+## Linear Probing
+
+[docs/linear probing](https://github.com/DLFundamentals/understanding-ssl/blob/main/docs/linear_probing.md) pretrained encoders,
+
+## Evaluation
+
+ and [docs/evaluation](https://github.com/DLFundamentals/understanding-ssl/blob/main/docs/evaluation.md) scripts used for reproducing experiments shown in our paper.
 
 ## License
 

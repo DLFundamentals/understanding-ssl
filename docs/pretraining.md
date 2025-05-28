@@ -1,13 +1,5 @@
 # SSL Pretraining
 
-## Installation
-
-Ensure you have all the necessary dependencies installed:
-
- ```bash
-pip install -r requirements.txt
-```
-
 ## Training on Single GPU
 
 Run the following command to train SimCLR on single GPU.
@@ -19,6 +11,7 @@ python scripts/train.py --config <path-to-yaml-config>
 ## Distributed Training on Multiple GPUs
 
 Run the following command to train SimCLR on multiple GPUs.
+> **NOTE:** In our experiments, we used 2 GPUs for training. You can adjust the number of GPUs based on your hadrware setup.
 
 ```bash
 torchrun --nproc_per_node=N_GPUs --standalone scripts/multigpu_train_simclr.py --config <path-to-yaml-config>
@@ -63,7 +56,6 @@ loss:
   temperature: 0.5
 
 evaluation:
-  K: [5, 10, 20]
   checkpoints_dir: "experiments/simclr/cifar10/checkpoints/"
   perform_knn: False
   perform_cdnv: True
@@ -81,20 +73,3 @@ evaluation:
 - **Evaluation**: Sets evaluation methods and checkpoint directory.
 
 Modify these settings based on your specific requirements. Happy pretraining! 🚀
-
----
-
-## Experiment Results: SimCLR Pretraining on CIFAR-10
-
-In this section, we present the results of multiple experiments conducted with different hyperparameter configurations. We evaluate the models using several metrics: CDNV (Contrastive Distance Norm Validation), NCCC (Normalized Cross-Correlation), Training Accuracy, and Test Accuracy. All experiments were conducted with a common set of training configurations unless specified otherwise.
-
-Below are the results for the experiments conducted with different hyperparameter settings. Training and Test Accuracies are reported after Linear Probing experiments.
-
-| Batch Size | LR  | GPUs | Projection Dim | Augmentation   | CDNV | NCCC | Training Acc. | Test Acc. |
-|---|---|---|---|---|---|---|---|---|
-| 1024       | 0.3 | 2    | 128             | Type #1 | | |          |      |
-| 1024       | 0.3 | 2    | 64            | Type #1 | | |          |      |
-| 1024       | 0.3 | 2    | 64             | Type #2 | | |         |      |
-
-`Type #1`: Color-jitter with `p = 1.0` and no grayscale \
-`Type #2`: Color-jitter with `p = 0.8` + grayscale
