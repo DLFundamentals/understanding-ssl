@@ -10,7 +10,6 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # utils
-from utils.augmentations import get_transforms
 from utils.dataset_loader import get_dataset
 from utils.losses import NTXentLoss
 
@@ -43,12 +42,12 @@ if __name__ == "__main__":
 
     dataset_name = config['dataset']['name']
     dataset_path = config['dataset']['path']
-    num_output_path_classes = config['dataset']['num_output_classes']
+    num_output_classes = config['dataset']['num_output_classes']
     
     batch_size = config['training']['batch_size']
     epochs = config['training']['num_epochs']
     lr = config['training']['lr']
-    augmentations_type = config['training']['augmentations_type'] # imagenet or cifar or other dataset name
+    augmentations_type = config['training']['augmentations_type'] # imagenet or cifar
     augment_both = config['training']['augment_both']
     save_every = config['training']['save_every']
     track_performance = config['training']['track_performance']
@@ -63,7 +62,6 @@ if __name__ == "__main__":
 
     temperature = config['loss']['temperature']
 
-    K = config['evaluation']['K'] if track_performance else None
     checkpoints_dir = config['evaluation']['checkpoints_dir']
     perform_knn = config['evaluation']['perform_knn']
     perform_cdnv = config['evaluation']['perform_cdnv']
@@ -75,6 +73,7 @@ if __name__ == "__main__":
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     # load dataset
+    # breakpoint()
     _, train_loader = get_dataset(dataset_name=dataset_name, 
                                 dataset_path=dataset_path,
                                 augment_both_views=augment_both,
@@ -82,7 +81,7 @@ if __name__ == "__main__":
 
     # define model
     if encoder_type == 'resnet50':
-        encoder = torchvision.models.resnet50(pretrained=False)
+        encoder = models.resnet50(pretrained=False)
     else:
         raise NotImplementedError(f"{encoder_type} not implemented")
     
@@ -93,15 +92,14 @@ if __name__ == "__main__":
                            hidden_dim=hidden_dim,
                            projection_dim=projection_dim,
                            track_performance=track_performance,
-                            K=K)
+                           )
     else:
         raise NotImplementedError(f"{method_type} not implemented")
     
     ssl_model = ssl_model.to(device)
 
     # define loss & optimizer
-    criterion = NTXentLoss(batch_size, temperature, device)
-    # optimizer = optim.Adam(ssl_model.parameters(), lr=lr) # replace with LARS for large batch sizes
+    criterion = NTXentLoss(temperature, device)
 
     # ========= LARS optimizer =========
     base_optimizer = optim.SGD(ssl_model.parameters(), lr=lr, momentum=0.9)

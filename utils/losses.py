@@ -26,7 +26,8 @@ class NTXentLoss(nn.Module):
 
         return mask
 
-    def forward(self, z_i, z_j, labels):
+    def forward(self, z_i, z_j, 
+                labels=None): # labels are not used in this loss
         # distributed version
         if dist.is_initialized():
             z_i = torch.cat(GatherLayer.apply(z_i), dim=0)
