@@ -1,11 +1,15 @@
 import numpy as np
+from collections import defaultdict
 import torch
 from datasets import load_dataset
-from torch.utils.data import DataLoader, Dataset, DistributedSampler, \
-                            WeightedRandomSampler, Sampler, Subset
+from torch.utils.data import DataLoader, Sampler, DistributedSampler, \
+                            Subset, ConcatDataset
 from torchvision import datasets, transforms
 
 from utils.augmentations import get_transforms
+from utils.batch_samplers import (ApproxStratifiedSampler,
+                                  DistributedStratifiedBatchSampler,
+                                  DistributedStratifiedBatchSamplerSoftBalance)
 from utils.dataset import SimCLRDataset
 
 
@@ -14,125 +18,110 @@ def get_dataset(dataset_name, dataset_path,
                 batch_size=64, num_workers=8, 
                 shuffle=True, **kwargs):
     
-    multi_gpu = kwargs.pop('multi_gpu', False)
-    world_size = kwargs.pop('world_size', 1)
-    supervision = kwargs.pop('supervision', 'SSL')
-    test = kwargs.pop('test', None)
-    classes = kwargs.pop('classes', None)
-
-    if dataset_name is None:
-        # default to cifar10
-        dataset_name = 'cifar10'
-
-    if dataset_name == 'imagenet':
-        dataset_download = load_dataset('timm/mini-imagenet')
-        train_dataset_download = dataset_download['train']
-        test_dataset_download = dataset_download['test']
-        train_transforms, basic_transforms = get_transforms('imagenet')
-        num_workers = 16
-        
-    elif dataset_name == 'cifar10':
-        train_dataset_download = datasets.CIFAR10(root=dataset_path, train=True, 
-                                          download=True, transform=None)
-        test_dataset_download = datasets.CIFAR10(root=dataset_path, train=False,
-                                       download=True, transform=None)      
-        train_transforms, basic_transforms = get_transforms('cifar')
-
-    elif dataset_name == 'cifar100':
-        train_dataset_download = datasets.CIFAR100(root=dataset_path, train=True, 
-                                         download=True, transform=None)
-        test_dataset_download = datasets.CIFAR100(root=dataset_path, train=False,
-                                                  download=True, transform=None) 
-        train_transforms, basic_transforms = get_transforms('cifar')
-
-    else:
-        raise NotImplementedError(f'no known dataset named {dataset_name}')
+    multi_gpu = kwargs.get('multi_gpu', False)
+    world_size = kwargs.get('world_size', 1)
+    supervision = kwargs.get('supervision', 'SSL')
+    test = kwargs.get('test', None)
+    classes = kwargs.get('classes', None)
     
-
+    # Load and transform raw datasets
+    raw_train, raw_test, labels_train, labels_test = _load_raw_datasets(dataset_name, dataset_path)
+    train_transforms, basic_transforms = _get_transforms(dataset_name)
+    
+    # Filter specific classes (optional)
     if classes is not None:
-        train_dataset_download = filter_class_indices(train_dataset_download, classes)
-        test_dataset_download = filter_class_indices(test_dataset_download, classes)
+        raw_train, labels = filter_class_indices(raw_train, classes, labels)
+        raw_test, labels_test = filter_class_indices(raw_test, classes, labels_test)
         
-    train_dataset = SimCLRDataset(train_dataset_download, 
+    train_dataset = SimCLRDataset(raw_train, 
                                 train_transforms, basic_transforms,
                                 augment_both_views=augment_both_views,
                                 dataset_name=dataset_name)
     
     # Adjust for multi-GPU
-    shuffle = not multi_gpu  # Ensures DistributedSampler handles shuffling
+    shuffle = not multi_gpu  # DistributedSampler handles shuffling
     effective_batch_size = batch_size // world_size if multi_gpu else batch_size
     drop_last = multi_gpu  # Avoids uneven batches in DDP
 
-    sampler = DistributedSampler(train_dataset, num_replicas=world_size) if multi_gpu else None
-    
-    if supervision == 'SSL' or supervision == 'CL':
-        train_dataloader = DataLoader(train_dataset, batch_size=effective_batch_size,
-                                    shuffle=shuffle, num_workers=num_workers,
-                                    pin_memory=True, drop_last=drop_last, 
-                                    sampler=sampler)
-    elif supervision == 'SCL':
-        print("Using stratified sampling")
-        # Approximate stratified sampling
-        labels = np.array(train_dataset_download.targets)
-        sampler = ApproxStratifiedSampler(labels, batch_size)
-        train_dataloader = DataLoader(train_dataset, batch_sampler=sampler,
-                                      num_workers=num_workers, pin_memory=True,
-                                      shuffle=False)
+    # Build train dataloader
+    train_dataloader = _build_dataloader(train_dataset, supervision, dataset_name, labels_train,
+                                     batch_size=effective_batch_size, num_workers=num_workers,
+                                     multi_gpu=multi_gpu, world_size=world_size, drop_last=drop_last)
+
+    # Build test loader if needed
         
-        # train_dataloader = DataLoader(train_dataset, batch_size=effective_batch_size,
-        #                             shuffle=shuffle, num_workers=num_workers,
-        #                             pin_memory=True, drop_last=drop_last, 
-        #                             sampler=sampler)
     if test is not None:
-        test_dataset = SimCLRDataset(test_dataset_download,
+        test_dataset = SimCLRDataset(raw_test,
                                      train_transforms, basic_transforms,
                                      augment_both_views=False,
                                      dataset_name=dataset_name)
         test_dataloader = DataLoader(test_dataset, batch_size=effective_batch_size,
-                                     shuffle=False, num_workers=num_workers,
+                                     shuffle=True, num_workers=num_workers,
                                      pin_memory=True)
-        return train_dataset, train_dataloader, test_dataset, test_dataloader
+        return train_dataset, train_dataloader, test_dataset, test_dataloader, labels, labels_test
     
     return train_dataset, train_dataloader
 
-def filter_class_indices(dataset, classes):
+def filter_class_indices(dataset, classes, labels):
     """
     Filter indices of a dataset for a subset of classes.
     """
-    targets = np.array(dataset.targets)
-    class_indices = np.where(np.isin(targets, classes))[0]
-    return Subset(dataset, class_indices)
+    if labels is None:
+        labels = np.array(dataset.targets)
+    class_indices = np.where(np.isin(labels, classes))[0]
+    labels = labels[class_indices]
+    class_indices = list(map(int, class_indices))
+    return Subset(dataset, class_indices), labels
 
-class ApproxStratifiedSampler(Sampler):
-    def __init__(self, labels, batch_size, num_batches=None):
-        """
-        labels: List or tensor of dataset labels
-        batch_size: Number of samples per batch
-        num_batches: Total batches (default: use full dataset)
-        """
-        self.labels = np.array(labels)
-        self.batch_size = batch_size
-        self.num_classes = len(np.unique(labels))
-        self.indices = np.arange(len(labels))
+def _load_raw_datasets(dataset_name, dataset_path):
+    if dataset_name == 'imagenet':
+        ds = load_dataset('timm/mini-imagenet')
+        return ds['train'], ds['test'], np.array(ds['train']['label']), np.array(ds['test']['label'])
 
-        # Compute class weights (inverse of class frequency)
-        class_counts = np.bincount(self.labels)
-        class_weights = 1.0 / class_counts
-        sample_weights = class_weights[self.labels]
+    elif dataset_name == 'cifar10':
+        train = datasets.CIFAR10(root=dataset_path, train=True, download=True)
+        test = datasets.CIFAR10(root=dataset_path, train=False, download=True)
+        return train, test, np.array(train.targets), np.array(test.targets)
 
-        # Compute number of batches
-        total_samples = num_batches * batch_size if num_batches else len(labels)
-        self.num_batches = total_samples // batch_size
+    elif dataset_name == 'cifar100':
+        train = datasets.CIFAR100(root=dataset_path, train=True, download=True)
+        test = datasets.CIFAR100(root=dataset_path, train=False, download=True)
+        return train, test, np.array(train.targets), np.array(test.targets)
 
-        # Weighted random sampling for rough balance
-        self.probabilities = sample_weights / sample_weights.sum()
+    elif dataset_name == 'svhn':
+        train = datasets.SVHN(root=dataset_path, split='train', download=True)
+        extra = datasets.SVHN(root=dataset_path, split='extra', download=True)
+        test = datasets.SVHN(root=dataset_path, split='test', download=True)
+        labels_train = np.concatenate([train.labels, extra.labels])
+        train = ConcatDataset([train, extra])
+        return train, test, labels_train, np.array(test.labels)
 
-    def __iter__(self):
-        """Yield batches with approximately balanced class distribution."""
-        for _ in range(self.num_batches):
-            batch_indices = np.random.choice(self.indices, size=self.batch_size, p=self.probabilities, replace=False)
-            yield batch_indices.tolist()
+    else:
+        raise NotImplementedError(f"Dataset {dataset_name} not supported.")
 
-    def __len__(self):
-        return self.num_batches
+def _get_transforms(dataset_name):
+    return get_transforms('cifar' if 'cifar' in dataset_name else dataset_name)
 
+def _build_sampler(supervision, dataset_name, labels, batch_size, multi_gpu, world_size):
+    if supervision != 'SCL':
+        return None
+
+    if multi_gpu:
+        rank = torch.distributed.get_rank()
+        if dataset_name == 'svhn':
+            return DistributedStratifiedBatchSamplerSoftBalance(labels, batch_size, num_replicas=world_size, rank=rank)
+        return DistributedStratifiedBatchSampler(labels, batch_size, num_replicas=world_size, rank=rank)
+    
+    return ApproxStratifiedSampler(labels, batch_size)
+
+def _build_dataloader(dataset, supervision, dataset_name, labels,
+                      batch_size, num_workers, multi_gpu, world_size, drop_last):
+
+    sampler = _build_sampler(supervision, dataset_name, labels, batch_size, multi_gpu, world_size)
+
+    if isinstance(sampler, Sampler):
+        return DataLoader(dataset, batch_sampler=sampler, num_workers=num_workers, pin_memory=True)
+
+    return DataLoader(dataset, batch_size=batch_size,
+                      shuffle=not multi_gpu, sampler=None, drop_last=drop_last,
+                      num_workers=num_workers, pin_memory=True)

@@ -23,11 +23,11 @@ class SimCLRDataset(Dataset):
     
     def __getitem__(self, idx):
         
-        if 'cifar' in self.dataset_name:
-            image, label = self.dataset[idx]
-        elif 'imagenet' in self.dataset_name:
+        if 'imagenet' in self.dataset_name:
             image = self.dataset[idx]['image'].convert("RGB")
             label = self.dataset[idx]['label']
+        else:
+            image, label = self.dataset[idx]
 
         view1 = self.train_transforms(image)
         if self.augment_both_views:
