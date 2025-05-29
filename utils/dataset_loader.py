@@ -30,7 +30,7 @@ def get_dataset(dataset_name, dataset_path,
     
     # Filter specific classes (optional)
     if classes is not None:
-        raw_train, labels = filter_class_indices(raw_train, classes, labels)
+        raw_train, labels_train = filter_class_indices(raw_train, classes, labels_train)
         raw_test, labels_test = filter_class_indices(raw_test, classes, labels_test)
         
     train_dataset = SimCLRDataset(raw_train, 
@@ -58,7 +58,7 @@ def get_dataset(dataset_name, dataset_path,
         test_dataloader = DataLoader(test_dataset, batch_size=effective_batch_size,
                                      shuffle=True, num_workers=num_workers,
                                      pin_memory=True)
-        return train_dataset, train_dataloader, test_dataset, test_dataloader, labels, labels_test
+        return train_dataset, train_dataloader, test_dataset, test_dataloader, labels_train, labels_test
     
     return train_dataset, train_dataloader
 
