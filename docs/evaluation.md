@@ -12,7 +12,7 @@ python evaluate.py --config <path-to-config-file> --ckpt_path <path-to-ckpts-dir
 - `ckpt_path` expects a directory and not a single .pth file
 - if output logs exist, this function will not overwrite but will update any missing epochs' information
 
-# Few-Shot error analysis
+# Few-shot error analysis
 
 This experiment involves two part: NCCC and LP (Linear Probing)
 
