@@ -87,9 +87,9 @@ class Trainer:
         self.log_every = log_every
         self.epochs_run = 0
         self.snapshot_dir = snapshot_dir
-        # if os.path.exists(self.snapshot_dir):
-        #     self._load_snapshot(self.snapshot_dir)
-        #     print(f"Loaded model from {self.snapshot_dir}")
+        if os.path.exists(self.snapshot_dir):
+            self._load_snapshot(self.snapshot_dir)
+            print(f"Loaded model from {self.snapshot_dir}")
 
         self.model = DDP(self.model, device_ids=[self.gpu_id], find_unused_parameters=True)
 
@@ -97,9 +97,9 @@ class Trainer:
         effective_lr = kwargs.get("effective_lr", 0.1)
         total_epochs = kwargs.get("total_epochs", 100)
         self.optimizer, self.scheduler = self.configure_optimizers(self.model, effective_lr, total_epochs)
-        # if os.path.exists(self.snapshot_dir):
-        #     self._load_optimizer_scheduler(self.snapshot_dir)
-        #     print(f"Loaded optimizer and scheduler from {self.snapshot_dir}")
+        if os.path.exists(self.snapshot_dir):
+            self._load_optimizer_scheduler(self.snapshot_dir)
+            print(f"Loaded optimizer and scheduler from {self.snapshot_dir}")
 
         self.track_performance = kwargs.get("track_performance", False)
         self.settings = kwargs.get("settings", None)
@@ -121,7 +121,7 @@ class Trainer:
         if len(dir_list) == 0:
             print("No snapshots found!")
             return
-        latest_snapshot = sorted(dir_list, reverse=True)[0]
+        latest_snapshot = sorted(dir_list, key=lambda x: int(x.split('_')[-1].split('.')[0]))[-1]
         snapshot_path = os.path.join(snapshot_dir, latest_snapshot)
 
         snapshot = torch.load(snapshot_path, map_location=loc)
@@ -136,7 +136,7 @@ class Trainer:
         if len(dir_list) == 0:
             print("No snapshots found!")
             return
-        latest_snapshot = sorted(dir_list, reverse=True)[0]
+        latest_snapshot = sorted(dir_list, key=lambda x: int(x.split('_')[-1].split('.')[0]))[-1]
         snapshot_path = os.path.join(snapshot_dir, latest_snapshot)
 
         snapshot = torch.load(snapshot_path, map_location=loc)
@@ -159,6 +159,11 @@ class Trainer:
         print(f"[GPU {self.gpu_id}] Training epoch {epoch}...")
         if isinstance(self.train_loader.sampler, DistributedSampler):
             self.train_loader.sampler.set_epoch(epoch)
+
+        # for custom distributed sampler
+        if hasattr(self.train_loader.batch_sampler, "set_epoch"):
+            self.train_loader.batch_sampler.set_epoch(epoch)
+            print('Distributed Startified Samplers set epoch method called ')
 
         loss_per_epoch = 0.0
         for batch in tqdm(self.train_loader):
@@ -195,16 +200,17 @@ class Trainer:
         # if self.epochs_run + 100 >= max_epochs:
         #     return
         for epoch in range(self.epochs_run, max_epochs):
+            
+            if self.gpu_id == 0:
+                # Save a snapshot
+                if epoch % self.save_every == 0 or (epoch < 100 and epoch % 10 == 0):
+                    self._save_snapshot(self.snapshot_dir, epoch)
+                    print(f"Saved model at epoch {epoch}")
 
             loss_per_epoch = self._run_epoch(epoch)
 
             # On GPU 0 do extra logging, snapshot saving, and evaluation
             if self.gpu_id == 0:
-                # Save a snapshot
-                if epoch % self.save_every == 0:
-                    self._save_snapshot(self.snapshot_dir, epoch)
-                    print(f"Saved model at epoch {epoch}")
-
                 # Evaluate and log performance every self.save_every epochs
                 if epoch % self.log_every == 0:
                     print(f"Loss per epoch: {loss_per_epoch}")
@@ -223,7 +229,7 @@ class Trainer:
                         self.log_metrics(eval_outputs, epoch, loss_per_epoch)
                         # Return the model to training mode
                         self.model.train()
-
+ 
             # Optionally, if using distributed training, you might call a barrier here:
             if dist.get_world_size() > 1:
                 dist.barrier()
@@ -323,7 +329,6 @@ if __name__ == "__main__":
     augment_both = config['training']['augment_both']
     save_every = config['training']['save_every']
     log_every = config['training']['log_every']
-    # save_model = config['training']['save_model']
     track_performance = config['training']['track_performance']
     multi_gpu = config['training']['multi_gpu']
     world_size = config['training']['world_size']
@@ -335,11 +340,8 @@ if __name__ == "__main__":
 
     temperature = config['loss']['temperature']
 
-    K = config['evaluation']['K'] if track_performance else None
-    perform_knn = config['evaluation']['perform_knn']
     perform_cdnv = config['evaluation']['perform_cdnv']
     perform_nccc = config['evaluation']['perform_nccc']
-    perform_tsne = config['evaluation']['perform_tsne']
     checkpoints_dir = config['evaluation']['checkpoints_dir']
 
     # set device
@@ -370,7 +372,6 @@ if __name__ == "__main__":
                 "hidden_dim": hidden_dim,
                 "projection_dim": projection_dim,
                 "temperature": temperature,
-                "K": K
             }
         )
     
@@ -378,7 +379,7 @@ if __name__ == "__main__":
     world_size = int(os.environ.get('WORLD_SIZE'))
     print(f"Dataset: {dataset_name}")
 
-    _, train_loader, _, test_loader = get_dataset(dataset_name=dataset_name, 
+    _, train_loader, _, test_loader, _, _ = get_dataset(dataset_name=dataset_name, 
                                     dataset_path=dataset_path,
                                     augment_both_views=augment_both,
                                     batch_size=batch_size, multi_gpu=multi_gpu,
@@ -423,8 +424,6 @@ if __name__ == "__main__":
     # train model
 
     effective_lr = lr*world_size*(batch_size//256)
-    # breakpoint()
-    # effective_lr = lr * 2.0 * (batch_size // 256)
     trainer = Trainer(
         model=ssl_model,
         train_loader=train_loader,
@@ -436,7 +435,6 @@ if __name__ == "__main__":
         track_performance=track_performance,
         effective_lr = effective_lr,
         settings = settings,
-        perform_knn = perform_knn,
         perform_cdnv = perform_cdnv,
         perform_nccc = perform_nccc,
         total_epochs = epochs
