@@ -8,7 +8,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import train_test_split, cross_val_score
 
 from tqdm import tqdm
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from collections import defaultdict
 
 # =================1️⃣ KNN Evaluation =================
@@ -96,23 +96,28 @@ class NCCCEval:
     perform NCCC evaluation in a normal or few-shot setting
     - calculate class-center using N data points per class
     - calculate NCCC score for each class
-    - calucate accuracy rates
+    - calculate accuracy rates
     - perform this for 'repeat' number of times
     """
-    def __init__(self, train_loader, output_classes=10 , device='cuda',
+    def __init__(self, train_loader: DataLoader,
+                 train_labels: np.ndarray, 
+                 output_classes:int =10 , 
+                 device:str ='cuda',
                  labels=None):
+        
         self.train_loader = train_loader
+        self.train_labels = train_labels
         self.output_classes = output_classes
         self.device = device
         if labels is not None:
             self.label_map = self._label_map(labels)
         else:
             self.label_map = None
-    
 
     def evaluate(self, model: torch.nn.Module, 
                  test_loader: torch.utils.data.DataLoader, 
-                 n_samples:int = None, repeat:int =5,
+                 n_samples:int = None,
+                 repeat:int = 5,
                  embedding_layer:List[int] = [0,1]):
         """
         Args:
@@ -122,29 +127,13 @@ class NCCCEval:
     
         """
         model.eval()
-
-        batch = next(iter(self.train_loader))
-        _, x, y = batch
-        x = x.to(self.device)
-        y = y.to(self.device)
-        if self.label_map is not None:
-            y = torch.tensor([self.label_map[i.item()] for i in y], device=self.device)
-
-        # get the embedding layer
-        h, g_h = model(x)
-        embeddings = [h, g_h]
-
-        # select the embedding layer
-        embeddings = [embeddings[i] for i in embedding_layer]
-        num_embs = len(embeddings)
-        emb_dims = []
-        for emb in embeddings:
-            emb = emb.view(emb.shape[0], -1)
-            emb_dims.append(emb.shape[1])
+        emb_dims = self._get_embedding_shapes(model, embedding_layer)
+        num_embs = len(embedding_layer)
         
         # repeat the evaluation for 'repeat' number of times
         accs = []
-        for _ in range(repeat):
+        for r in range(repeat):
+            print(f"Repeat {r+1}/{repeat} for NCCC evaluation")
             # calculate class centers
             means = self.fit(model, n_samples, num_embs, emb_dims, embedding_layer)
 
@@ -155,90 +144,58 @@ class NCCCEval:
 
         # calculate average accuracy
         avg_accs = [sum([accs[i][j] for i in range(repeat)]) / repeat for j in range(num_embs)]
-
         return avg_accs
     
 
-    def fit(self, model, n_samples,
-            num_embs, emb_dims, embedding_layer,):
+    def fit(self, model: torch.nn.Module,
+            n_samples: Optional[int],
+            num_embs: int,
+            emb_dims: List[int],
+            embedding_layer: List[int],):
         """
         fit the NCCC model
         - calculate class centers using N data points per class
         - store class centers
         """
         assert num_embs == len(embedding_layer)
-        N = [self.output_classes * [0] for _ in range(num_embs)] # tracks number of samples per class
+        counts = [self.output_classes * [0] for _ in range(num_embs)] # tracks number of samples per class
 
         means = []
         for i in range(num_embs):
             means += [torch.zeros(self.output_classes, emb_dims[i]).to(self.device)]
 
+        # if n_samples is not None, we need to sample n_samples per class
+        if n_samples is not None:
+            loader = self._get_fewshot_loader(n_samples)
+        else:
+            loader = self.train_loader
+
         with torch.no_grad():
-            for batch in tqdm(self.train_loader, desc=f"Computing means for N samples = {n_samples}"):
+            for batch in tqdm(loader, desc=f"Computing means for N samples = {n_samples}"):
                 _, x, y = batch
                 x = x.to(self.device)
                 y = y.to(self.device)
                 if self.label_map is not None:
                     y = torch.tensor([self.label_map[i.item()] for i in y], device=self.device)
 
-                if n_samples is not None:
-                    # select indxs for inputs based on N and output_classes
-                    final_mask = self.get_batch_idx_mask(y, n_samples, N)
-                    x = x[final_mask]
-                    y = y[final_mask]
-                
-                # non-empty x
-                if x.shape[0] == 0:
-                    continue
-
                 # get the embeddings
-                h, g_h = model(x)
-                embeddings = [h, g_h]
+                embeddings = self._extract_embeddings(model, x, embedding_layer)
 
-                for i in embedding_layer:
-                    emb = embeddings[i].view(embeddings[i].shape[0], -1)
-                    
+                for i, emb in enumerate(embeddings):
                     for c in range(self.output_classes):
                         idxs = y == c
                         if len(idxs) == 0:
                             continue
-
                         h_c = emb[idxs]
                         means[i][c] += torch.sum(h_c, dim=0)
-                        N[i][c] += h_c.shape[0]
+                        counts[i][c] += h_c.shape[0]
 
         # calculate the means
         for i in range(num_embs):
             for c in range(self.output_classes):
-                means[i][c] /= N[i][c]
+                means[i][c] /= max(counts[i][c], 1e-6)  # avoid division by zero
 
         return means
-         
-    def get_batch_idx_mask(self, y, n_samples, N):
-        final_mask = torch.zeros_like(y, dtype=torch.bool)  # Use boolean mask for indexing
-        for c in range(self.output_classes):
-            mask = (y == c).nonzero(as_tuple=True)[0]  # Indices where class == c
-
-            if N[0][c] >= n_samples:  # If we already have enough, skip
-                continue
-
-            n_remaining = n_samples - N[0][c]
-            available_samples = mask.shape[0]
-
-            if available_samples > 0:
-                # If we have more than needed, randomly select `n_remaining ± small variation`
-                if available_samples >= n_remaining:
-                    random_offset = torch.randint(-2, 3, (1,)).item()  # Small variation of ±2
-                    num_to_take = max(1, min(n_remaining + random_offset, available_samples))
-                else:
-                    num_to_take = available_samples  # Take whatever is available
-
-                selected_indices = mask[torch.randperm(available_samples)[:num_to_take]]
-                final_mask[selected_indices] = True
-                N[0][c] += num_to_take  # Update count
-
-        return final_mask
-
     
     @torch.no_grad()
     def calculate_nccc_score(self, num_embs, model, means, test_loader, embedding_layer):
@@ -246,6 +203,7 @@ class NCCCEval:
         calculate NCCC score
         """
         corrects = num_embs * [0.0]
+        total = 0.0
 
         for batch in tqdm(test_loader, desc="Computing NCCC Score"):
             _, x, y = batch
@@ -254,13 +212,11 @@ class NCCCEval:
             if self.label_map is not None:
                 y = torch.tensor([self.label_map[i.item()] for i in y], device=self.device)
 
-            h, g_h = model(x)
-            embeddings = [h, g_h]
+            embeddings = self._extract_embeddings(model, x, embedding_layer)
+            total += y.size(0)
 
-            for i in embedding_layer:
-                emb = embeddings[i].view(embeddings[i].shape[0], -1)
+            for i, emb in enumerate(embeddings):
                 emb = emb.detach()
-
                 # calculate the distance
                 dist = torch.cdist(emb.unsqueeze(0), means[i].unsqueeze(0)).squeeze(0)
                 preds = torch.argmin(dist, dim=1)
@@ -271,6 +227,35 @@ class NCCCEval:
 
         return accs
     
+    def _get_fewshot_loader(self, n_samples):
+        """
+        Extract n_samples per class from the training loader and return a DataLoader with only those samples.
+        """
+        dataset = self.train_loader.dataset
+
+        class_to_indices = defaultdict(list)
+        # Step 1: Collect all sample indices per class
+        for idx in range(len(dataset)):
+            label = self.train_labels[idx]
+            class_to_indices[label].append(idx)
+
+        # Step 2: Randomly sample n_samples from each class
+        selected_indices = []
+        for c in class_to_indices.keys():
+            indices = class_to_indices[c]
+            if len(indices) < n_samples:
+                raise ValueError(f"Not enough samples for class {c} (found {len(indices)}, needed {n_samples})")
+            selected = random.sample(indices, n_samples)
+            selected_indices.extend(selected)
+
+        # Step 3: Create new dataloader from subset
+        fewshot_subset = Subset(dataset, selected_indices)
+        batch_size = min(len(selected_indices), self.train_loader.batch_size)
+        fewshot_loader = DataLoader(fewshot_subset, batch_size=batch_size,
+                                    shuffle=True, drop_last=False,
+                                    pin_memory=True, num_workers=32)
+        return fewshot_loader
+    
     def _label_map(self, labels):
         """
         map the labels to the output_classes
@@ -280,7 +265,20 @@ class NCCCEval:
             label_map[label] = i
 
         return label_map
-                
+    
+    def _extract_embeddings(self, model: torch.nn.Module, x: torch.Tensor,
+                            embedding_layer: List[int]) -> List[torch.Tensor]:
+        h, g_h = model(x)
+        embeddings = [h.view(h.size(0), -1), g_h.view(g_h.size(0), -1)]
+        return [embeddings[i] for i in embedding_layer]
+    
+    def _get_embedding_shapes(self, model: torch.nn.Module, embedding_layer: List[int]) -> List[int]:
+        with torch.no_grad():
+            _, x, _ = next(iter(self.train_loader))
+            x = x.to(self.device)
+            h, g_h = model(x[:1])
+            embeddings = [h.view(1, -1), g_h.view(1, -1)]
+            return [embeddings[i].size(1) for i in embedding_layer]
 
 
 # ================= 3️⃣ Linear Probing ===================

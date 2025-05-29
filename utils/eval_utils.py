@@ -187,7 +187,7 @@ def evaluate_losses_for_ssl(ssl_model, checkpoints_dir, train_loader, test_loade
 
 def run_few_shot_error_analysis(ncc_evaluator, ssl_model, nscl_model, train_loader, test_loader,
                                 output_csv_path, n_samples_list=[1, 5, 10, 20, 50, 100], repeat=5,
-                                two_way=False, **kwargs):
+                                **kwargs):
     """
     Performs few-shot error analysis for two models (e.g., a contrastive (CL) model and a non-scaled version (NSCL)).
     
@@ -224,36 +224,26 @@ def run_few_shot_error_analysis(ncc_evaluator, ssl_model, nscl_model, train_load
         nscl_few_shot_accs_train = []
         nscl_few_shot_accs_test = []
         print(f"Evaluating for number of samples: {n_samples}")
-        # Evaluate the CL (ssl_model) on the training set
         if n_samples in few_shot_df['Number of Shots'].values:
             print('Evaluation exists!')
             continue
-
-        if two_way:
-            total_eval_runs = 3
         
         for _ in range(total_eval_runs):
-            if two_way:
-                # get subset of dataloaders for randomly sampled two classes
-                classes_group = random.sample(range(ncc_evaluator.output_classes), 2)
-                train_dataset, train_loader, test_dataset, test_loader, train_labels, test_labels = get_dataset(dataset_name=kwargs.get('dataset_name'), 
-                                                                                                                dataset_path=kwargs.get('dataset_path'),
-                                                                                                                batch_size=256, 
-                                                                                                                augment_both_views=False,
-                                                                                                                test=True,
-                                                                                                                classes = classes_group)
-
-            
+            # Evaluate the CL (ssl_model) on the training set
+            print(f"Evaluating SSL model on training set")
             ssl_accs_train = ncc_evaluator.evaluate(ssl_model, train_loader, n_samples=n_samples, repeat=repeat)
             ssl_few_shot_accs_train.append(ssl_accs_train[1])
             # Evaluate the CL model on the test set
+            print(f"Evaluating SSL model on test set")
             ssl_accs_test = ncc_evaluator.evaluate(ssl_model, test_loader, n_samples=n_samples, repeat=repeat)
             ssl_few_shot_accs_test.append(ssl_accs_test[1])
             
             # Evaluate the NSCL (nscl_model) on the training set
+            print(f"Evaluating NSCL model on training set")
             nscl_accs_train = ncc_evaluator.evaluate(nscl_model, train_loader, n_samples=n_samples, repeat=repeat)
             nscl_few_shot_accs_train.append(nscl_accs_train[1])
             # Evaluate the NSCL model on the test set
+            print(f"Evaluating NSCL model on test set")
             nscl_accs_test = ncc_evaluator.evaluate(nscl_model, test_loader, n_samples=n_samples, repeat=repeat)
             nscl_few_shot_accs_test.append(nscl_accs_test[1])
 
@@ -271,15 +261,6 @@ def run_few_shot_error_analysis(ncc_evaluator, ssl_model, nscl_model, train_load
         }
 
         few_shot_df = pd.concat([few_shot_df, pd.DataFrame([new_row])], ignore_index=True)
-    
-    # Build the DataFrame with the gathered metrics.
-    # few_shot_df = pd.DataFrame({
-    #     "Number of Shots": n_samples_list,
-    #     "CL Train": ssl_few_shot_accs_train,
-    #     "CL Test": ssl_few_shot_accs_test,
-    #     "NSCL Train": nscl_few_shot_accs_train,
-    #     "NSCL Test": nscl_few_shot_accs_test
-    # })
     
     # Save the DataFrame to the specified CSV file.
     few_shot_df.to_csv(output_csv_path, index=False)
