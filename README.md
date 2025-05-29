@@ -60,7 +60,17 @@ Please refer to [docs/pretraining](https://github.com/DLFundamentals/understandi
 
 ## Linear Probing
 
-[docs/linear probing](https://github.com/DLFundamentals/understanding-ssl/blob/main/docs/linear_probing.md) pretrained encoders,
+To evaluate pretrained encoders via linear probing, you can run:
+
+```bash
+python scripts/linear_probe.py --config <path-to-config-file> --ckpt_path <path-to-ckpt-dir> --output_path <path-to-save-logs> --N <n_samples>
+```
+
+For example,
+
+```bash
+python scripts/linear_probe.py --config configs/simclr_DCL_cifar10_b1024.yaml --ckpt_path experiments/simclr/cifar10_dcl/checkpoints/ --output_path logs/cifar10/ --N 500
+```
 
 ## Evaluation
 
