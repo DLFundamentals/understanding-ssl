@@ -1,0 +1,51 @@
+experiment_name: "simclr/cifar100"
+method_type: "simclr"
+supervision: "SSL"
+
+dataset:
+  name: "cifar100"
+  path: "./data/"
+  num_output_classes: 100
+
+training:
+  batch_size: 1024
+  num_epochs: 2500
+  lr: 0.3
+  augmentations_type: "cifar"
+  augment_both: True
+  save_every: 10
+  log_every: 10
+  track_performance: False
+  multi_gpu: True
+  world_size: 2
+
+model:
+  encoder_type: "resnet50"
+  pretrained: False
+  width_multiplier: 2
+  hidden_dim: 2048
+  projection_dim: 128
+
+loss:
+  temperature: 0.5
+
+evaluation:
+  K: [5, 10, 20]
+  checkpoints_dir: "experiments/simclr/cifar100_dcl_tauv2/checkpoints/"
+  batch_size: 512
+  perform_knn: False
+  perform_cdnv: True
+  perform_nccc: True
+  perform_linear: False
+  perform_tsne: False
+
+linear:
+  batch_size: 256
+  num_epochs: 100
+  num_output_classes: 100
+  augment_both: False
+  top_lr: 3e-4
+  momentum: 0.9
+  weight_decay: 5e-4
+  track_performance: True
+  save_every: 10
