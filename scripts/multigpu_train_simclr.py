@@ -400,7 +400,7 @@ if __name__ == "__main__":
                            hidden_dim=hidden_dim,
                            projection_dim=projection_dim,
                            track_performance=track_performance,
-                            K=K)
+                           )
     else:
         raise NotImplementedError(f"{method_type} not implemented")
 
