@@ -1,13 +1,17 @@
-import os, sys
+import os, sys, random
 from tqdm import tqdm
+import numpy as np
 import torch
 import pandas as pd
+from collections import defaultdict
+from torch.utils.data import DataLoader, Dataset, Subset
 
 # Append the parent directory for utility modules.
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.losses import NTXentLoss, WeakNTXentLoss, ContrastiveLoss
 from utils.metrics import KNN, NCCCEval, anisotropy
+from utils.dataset_loader import get_dataset
 # from utils.analysis import get_ssl_minus_scl_loss
 
 def load_snapshot(snapshot_path, model, device):
@@ -76,10 +80,13 @@ def get_ssl_minus_scl_loss(ssl_model, loader, ssl_criterion, weak_scl_criterion,
             print(f"Total CL Loss: {total_cl_loss/len(loader)}")
 
     diff = total_ssl_loss - total_scl_loss
-    diff_cl = total_cl_loss - total_scl_loss
-
-    return diff/len(loader), diff_cl/len(loader), total_cl_loss/len(loader), \
+    
+    if cl_criterion:
+        diff_cl = total_cl_loss - total_scl_loss
+        return diff/len(loader), diff_cl/len(loader), total_cl_loss/len(loader), \
         total_ssl_loss/len(loader), total_scl_loss/len(loader)
+
+    return diff/len(loader), total_ssl_loss/len(loader), total_scl_loss/len(loader)
 
 
 def evaluate_losses_for_ssl(ssl_model, checkpoints_dir, train_loader, test_loader,
@@ -179,7 +186,8 @@ def evaluate_losses_for_ssl(ssl_model, checkpoints_dir, train_loader, test_loade
 
 
 def run_few_shot_error_analysis(ncc_evaluator, ssl_model, nscl_model, train_loader, test_loader,
-                                output_csv_path, n_samples_list=[1, 5, 10, 20, 50, 100], repeat=5):
+                                output_csv_path, n_samples_list=[1, 5, 10, 20, 50, 100], repeat=5,
+                                two_way=False, **kwargs):
     """
     Performs few-shot error analysis for two models (e.g., a contrastive (CL) model and a non-scaled version (NSCL)).
     
@@ -199,10 +207,6 @@ def run_few_shot_error_analysis(ncc_evaluator, ssl_model, nscl_model, train_load
     Returns:
         few_shot_df (pd.DataFrame): DataFrame containing few-shot evaluation metrics.
     """
-    ssl_few_shot_accs_train = []
-    ssl_few_shot_accs_test = []
-    nscl_few_shot_accs_train = []
-    nscl_few_shot_accs_test = []
 
     if os.path.exists(output_csv_path):
         few_shot_df = pd.read_csv(output_csv_path)
@@ -212,31 +216,58 @@ def run_few_shot_error_analysis(ncc_evaluator, ssl_model, nscl_model, train_load
             "NSCL Train", "NSCL Test"
         ])
     
+
+    total_eval_runs = 5
     for n_samples in n_samples_list:
+        ssl_few_shot_accs_train = []
+        ssl_few_shot_accs_test = []
+        nscl_few_shot_accs_train = []
+        nscl_few_shot_accs_test = []
         print(f"Evaluating for number of samples: {n_samples}")
         # Evaluate the CL (ssl_model) on the training set
         if n_samples in few_shot_df['Number of Shots'].values:
-            print('already evalaued')
+            print('Evaluation exists!')
             continue
-        ssl_accs_train = ncc_evaluator.evaluate(ssl_model, train_loader, n_samples=n_samples, repeat=repeat)
-        ssl_few_shot_accs_train.append(ssl_accs_train[1])
-        # Evaluate the CL model on the test set
-        ssl_accs_test = ncc_evaluator.evaluate(ssl_model, test_loader, n_samples=n_samples, repeat=repeat)
-        ssl_few_shot_accs_test.append(ssl_accs_test[1])
+
+        if two_way:
+            total_eval_runs = 3
         
-        # Evaluate the NSCL (nscl_model) on the training set
-        nscl_accs_train = ncc_evaluator.evaluate(nscl_model, train_loader, n_samples=n_samples, repeat=repeat)
-        nscl_few_shot_accs_train.append(nscl_accs_train[1])
-        # Evaluate the NSCL model on the test set
-        nscl_accs_test = ncc_evaluator.evaluate(nscl_model, test_loader, n_samples=n_samples, repeat=repeat)
-        nscl_few_shot_accs_test.append(nscl_accs_test[1])
+        for _ in range(total_eval_runs):
+            if two_way:
+                # get subset of dataloaders for randomly sampled two classes
+                classes_group = random.sample(range(ncc_evaluator.output_classes), 2)
+                train_dataset, train_loader, test_dataset, test_loader, train_labels, test_labels = get_dataset(dataset_name=kwargs.get('dataset_name'), 
+                                                                                                                dataset_path=kwargs.get('dataset_path'),
+                                                                                                                batch_size=256, 
+                                                                                                                augment_both_views=False,
+                                                                                                                test=True,
+                                                                                                                classes = classes_group)
+
+            
+            ssl_accs_train = ncc_evaluator.evaluate(ssl_model, train_loader, n_samples=n_samples, repeat=repeat)
+            ssl_few_shot_accs_train.append(ssl_accs_train[1])
+            # Evaluate the CL model on the test set
+            ssl_accs_test = ncc_evaluator.evaluate(ssl_model, test_loader, n_samples=n_samples, repeat=repeat)
+            ssl_few_shot_accs_test.append(ssl_accs_test[1])
+            
+            # Evaluate the NSCL (nscl_model) on the training set
+            nscl_accs_train = ncc_evaluator.evaluate(nscl_model, train_loader, n_samples=n_samples, repeat=repeat)
+            nscl_few_shot_accs_train.append(nscl_accs_train[1])
+            # Evaluate the NSCL model on the test set
+            nscl_accs_test = ncc_evaluator.evaluate(nscl_model, test_loader, n_samples=n_samples, repeat=repeat)
+            nscl_few_shot_accs_test.append(nscl_accs_test[1])
 
         new_row = {
             "Number of Shots": n_samples,
-            "CL Train": ssl_accs_train[1],
-            "CL Test": ssl_accs_test[1],
-            "NSCL Train": nscl_accs_train[1],
-            "NSCL Test": nscl_accs_test[1]
+            "CL Train": np.mean(ssl_few_shot_accs_train),
+            "CL Test": np.mean(ssl_few_shot_accs_test),
+            "CL Train STD": np.std(ssl_few_shot_accs_train),
+            "CL Test STD": np.std(ssl_few_shot_accs_test),
+            "NSCL Train": np.mean(nscl_few_shot_accs_train),
+            "NSCL Test": np.mean(nscl_few_shot_accs_test),
+            "NSCL Train STD": np.std(nscl_few_shot_accs_train),
+            "NSCL Test STD": np.std(nscl_few_shot_accs_test),
+
         }
 
         few_shot_df = pd.concat([few_shot_df, pd.DataFrame([new_row])], ignore_index=True)
@@ -257,3 +288,60 @@ def run_few_shot_error_analysis(ncc_evaluator, ssl_model, nscl_model, train_load
     return few_shot_df
 
 
+def run_few_shot_error_analysis_per_C(ncc_evaluator, 
+                                ssl_model, nscl_model, 
+                                train_loader, test_loader,
+                                n_samples=10, repeat=5):
+    """
+    """
+    
+    ssl_accs_train = ncc_evaluator.evaluate(ssl_model, train_loader, n_samples=n_samples, repeat=repeat)
+    # Evaluate the CL model on the test set
+    ssl_accs_test = ncc_evaluator.evaluate(ssl_model, test_loader, n_samples=n_samples, repeat=repeat)
+    
+    # Evaluate the NSCL (nscl_model) on the training set
+    nscl_accs_train = ncc_evaluator.evaluate(nscl_model, train_loader, n_samples=n_samples, repeat=repeat)
+    # Evaluate the NSCL model on the test set
+    nscl_accs_test = ncc_evaluator.evaluate(nscl_model, test_loader, n_samples=n_samples, repeat=repeat)
+    
+    return ssl_accs_train, ssl_accs_test, nscl_accs_train, nscl_accs_test
+
+def get_fewshot_loader(n_samples, dataset, labels,
+                       classes=None,
+                       batch_size=256,
+                      ):
+        """
+        Extract n_samples per class from the training loader and return a DataLoader with only those samples.
+        
+        Args:
+            n_samples (int): number of samples per class to extract.
+
+        Returns:
+            DataLoader: a new DataLoader with n_samples per class.
+        """
+        random.seed(123)
+
+        class_to_indices = defaultdict(list)
+        # Step 1: Collect all sample indices per class
+        for idx in range(len(dataset)):
+            label = labels[idx]
+
+            class_to_indices[label].append(idx)
+
+        # Step 2: Randomly sample n_samples from each class
+        selected_indices = []
+        for c in classes:
+            indices = class_to_indices[c]
+            if len(indices) < n_samples:
+                raise ValueError(f"Not enough samples for class {c} (found {len(indices)}, needed {n_samples})")
+            selected = random.sample(indices, n_samples)
+            selected_indices.extend(selected)
+
+        # Step 3: Create new dataloader from subset
+        fewshot_subset = Subset(dataset, selected_indices)
+
+        batch_size = min(len(selected_indices), batch_size)
+        fewshot_loader = DataLoader(fewshot_subset, batch_size=batch_size,
+                                    shuffle=True, drop_last=False)
+
+        return fewshot_loader
