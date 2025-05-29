@@ -16,7 +16,9 @@ python evaluate.py --config <path-to-config-file> --ckpt_path <path-to-ckpts-dir
 
 This experiment involves two part: NCCC and LP (Linear Probing)
 
-For NCCC, run:
+## NCCC
+
+Run the following command for NCCC analysis:
 
 ```bash
 python scripts/evaluate.py --config <path> --ckpt_path <path> --ckpt_path_nscl <path> --output_path <path>
@@ -33,14 +35,25 @@ python scripts/nccc_eval.py --config configs/simclr_DCL_cifar10_b1024.yaml --ckp
 - `ckpt_paths` are directories, the code automatically selects the latest model, i.e., more recent epoch.
 - You can find logs in `few_shot_analysis.csv` and reproduce NCCC error curves shown in figure 4.
 
-For Linear Probing, run
+## Linear Probing
+
+For linear probing, run the following command:
+
 ```bash
-python scripts/linear_probe.py --config <path-to-config-file> --ckpt_path <path-to-pth-file>
+python scripts/linear_probe.py --config <path-to-config-file> --ckpt_path <path-to-ckpt-dir> --output_path <path-to-save-logs> --N <n_samples>
+```
+
+For example,
+
+```bash
+python scripts/linear_probe.py --config configs/simclr_DCL_cifar10_b1024.yaml --ckpt_path experiments/simclr/cifar10_dcl/checkpoints/ --output_path logs/cifar10/ --N 500
 ```
 
 ### Notes:
-- Only in this case, our model expects exact path to checkpoint file to be loaded.
-- `TODOs`: make this similar to other evaluation scripts - load ckpts in a similar fashion
+
+- You can find logs in `few_shot_analysis_{supervision}.csv` where `supervision` is set in config file
+- Using logs, you can reproduce LP error curves shown in figure 4.
+- Again, `ckpt_paths` are directories, the code automatically selects the latest model, i.e., more recent epoch.
 
 # Validating the bound as a function of C
 
