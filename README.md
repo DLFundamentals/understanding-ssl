@@ -74,7 +74,21 @@ python scripts/linear_probe.py --config configs/simclr_DCL_cifar10_b1024.yaml --
 
 ## Evaluation
 
- and [docs/evaluation](https://github.com/DLFundamentals/understanding-ssl/blob/main/docs/evaluation.md) scripts used for reproducing experiments shown in our paper.
+To validate our Theorem [1], you can run:
+
+```bash
+python scripts/losses_eval.py --config <path-to-config-file> --ckpt_path <path-to-ckpt-dir> --output_path <path-to-save-logs>
+```
+
+For example,
+
+```bash
+python scripts/losses_eval.py --config configs/simclr_DCL_cifar10_b1024.yaml --ckpt_path experiments/simclr/cifar10_dcl/checkpoints/ --output_path logs/cifar10/simclr/exp1/
+```
+
+This will log `losses.csv` file to your `output_path` directory. You can analyse losses as a function of epochs and verify our proposed bound.
+
+Please refer to [docs/evaluation](https://github.com/DLFundamentals/understanding-ssl/blob/main/docs/evaluation.md) scripts for reproducing additional experiments shown in our paper.
 
 ## License
 
