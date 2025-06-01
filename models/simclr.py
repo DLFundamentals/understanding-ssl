@@ -11,6 +11,7 @@ from utils.analysis import cal_cdnv, embedding_performance_nearest_mean_classifi
 import os
 from tqdm import tqdm
 from collections import defaultdict
+import wandb
 
 class SimCLR(nn.Module):
     def __init__(self, model, layer = -2, dataset = 'imagenet',
@@ -27,7 +28,9 @@ class SimCLR(nn.Module):
         with torch.no_grad():
             if dataset == 'imagenet':
                 h = self.encoder(torch.randn(1, 3, 224, 224))
-            elif dataset == 'cifar' or 'cifar' in dataset:
+            elif 'cifar' in dataset:
+                h = self.encoder(torch.randn(1, 3, 32, 32))
+            elif dataset == 'svhn':
                 h = self.encoder(torch.randn(1, 3, 32, 32))
             else:
                 raise NotImplementedError(f"{dataset} not implemented")
@@ -38,8 +41,6 @@ class SimCLR(nn.Module):
 
         # whether to track performance or not
         self.track_performance = kwargs.get('track_performance', False)
-        if self.track_performance:
-            self.K = kwargs.get('K', 5)
 
     def forward(self, X):
   
@@ -52,12 +53,16 @@ class SimCLR(nn.Module):
     # ========== Training Function ==========
     def custom_train(self, train_loader,
               criterion, optimizer, num_epochs, 
-              augment_both = True, save_every = 10, 
+              augment_both = True, save_every = 10, log_every=10,
               experiment_name = 'simclr/cifar10',
               device = 'cuda', **kwargs):
         
         self.to(device) # move model to device
         print(f"Training on {device} started! Experiment name: {experiment_name}")
+
+        # useful for logging
+        self.optimizer = optimizer
+        self.wandb_defined = False
 
         for epoch in range(num_epochs):
             self.train()
@@ -96,9 +101,13 @@ class SimCLR(nn.Module):
                 torch.save(self.state_dict(), checkpoint_path)
                 print(f"Checkpoint saved: {checkpoint_path}")
 
-                # Evaluate KNN
+            if (epoch + 1) % log_every == 0:
+                # Evaluate
                 if self.track_performance:
-                    self.custom_eval(train_loader)
+                    with torch.no_grad():
+                        outputs = self.custom_eval(train_loader)
+                    
+                    self.log_metrics(outputs, epoch, avg_loss)
 
 
         print("Training Complete! 🎉")
@@ -137,19 +146,64 @@ class SimCLR(nn.Module):
         return outputs
 
     # ========== Run One Batch =================
-    def run_one_batch(self, batch, criterion, optimizer, device):
+    def run_one_batch(self, batch, criterion, optimizer=None, device='cuda'):
         # get the inputs
-        view1, view2, _ = batch
+        view1, view2, labels = batch
         # skip the batch with only 1 image
         if view1.size(0) < 2:
             return 0
         view1, view2 = view1.to(device), view2.to(device)
+        labels = labels.to(device)
 
         # forward pass
         view1_features, view1_proj = self(view1)
         view2_features, view2_proj = self(view2)
 
         # compute contrastive loss
-        loss = criterion(view1_proj, view2_proj)
+        loss = criterion(view1_proj, view2_proj, labels)
 
         return loss
+    
+    def log_metrics(self, eval_outputs, cur_epoch, cur_loss_per_epoch):
+        # define epoch as x-axis
+        if not self.wandb_defined:
+            wandb.define_metric("epoch")
+            wandb.define_metric("learning_rate", step_metric="epoch")
+            wandb.define_metric("knn_accuracy", step_metric="epoch")
+            wandb.define_metric("cdnv_0", step_metric="epoch")
+            wandb.define_metric("log_cdnv_0", step_metric="epoch")
+            wandb.define_metric("cdnv_1", step_metric="epoch")
+            wandb.define_metric("log_cdnv_1", step_metric="epoch")
+            wandb.define_metric("nccc_0", step_metric="epoch")
+            wandb.define_metric("nccc_1", step_metric="epoch")
+
+            # define loss per epoch
+            wandb.define_metric("loss_per_epoch", step_metric="epoch")
+            self.wandb_defined = True
+
+        # collect all logs in one dictionary
+        log_data = {"epoch": cur_epoch}
+        log_data["learning_rate"] = self.optimizer.param_groups[0]["lr"]
+        log_data["loss_per_epoch"] = cur_loss_per_epoch
+
+        if self.perform_knn:
+            log_data["knn_accuracy"] = eval_outputs["knn_train_acc"]
+
+        if self.perform_cdnv:
+            if isinstance(eval_outputs["cdnv"], list):
+                for i, cdnv in enumerate(eval_outputs["cdnv"]):
+                    log_data[f'cdnv_{i}'] = cdnv
+                    log_data[f'log_cdnv_{i}'] = torch.log10(torch.tensor(cdnv))
+            else:
+                log_data["cdnv_0"] = eval_outputs["cdnv"]
+                log_data["log_cdnv_0"] = torch.log10(torch.tensor(eval_outputs["cdnv"]))
+
+        if self.perform_nccc:
+            if isinstance(eval_outputs["nccc"], list):
+                for i, nccc in enumerate(eval_outputs["nccc"]):
+                    log_data[f'nccc_{i}'] = nccc
+            else:
+                log_data["nccc"] = eval_outputs["nccc"]
+
+        # log all metrics
+        wandb.log(log_data)
