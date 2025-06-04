@@ -1,2 +1,11 @@
 __pycache__/
 .ipynb
+gconfigs/corrupted_labels/
+*.csv
+*.pngconfigs/corrupted_labels/
+data/
+wandb/
+*.pt
+*.csv
+*.png
+*.log
