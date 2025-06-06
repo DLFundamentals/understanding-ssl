@@ -99,7 +99,7 @@ This project is licensed under the [Apache-2.0](https://github.com/DLFundamental
 If you find our work useful in your research or applications, please cite us using the following BibTeX:
 
 ```bibtex
-@misc{luthra2025selfsupervisedcontrastivelearningapproximately,
+@misc{clVSnscl,
       title={Self-Supervised Contrastive Learning is Approximately Supervised Contrastive Learning}, 
       author={Achleshwar Luthra and Tianbao Yang and Tomer Galanti},
       year={2025},
