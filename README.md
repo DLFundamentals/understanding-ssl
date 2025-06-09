@@ -1,6 +1,7 @@
 # Self-Supervised Contrastive Learning is Approximately Supervised Contrastive Learning
+[Project Page](https://dlfundamentals.github.io/ssl-is-approximately-sl/) | [Paper](https://arxiv.org/abs/2506.04411)
 
-In [our work](https://github.com/DLFundamentals/understanding-ssl), we make progress towards addressing the following question:
+In our work we make progress towards addressing the following question:
 
 > **How does self-supervsied CL learn representations similar to supervised learning, despite lacking explicit supervision?**
 
