@@ -100,13 +100,12 @@ This project is licensed under the [Apache-2.0](https://github.com/DLFundamental
 If you find our work useful in your research or applications, please cite us using the following BibTeX:
 
 ```bibtex
-@misc{clVSnscl,
-      title={Self-Supervised Contrastive Learning is Approximately Supervised Contrastive Learning}, 
-      author={Achleshwar Luthra and Tianbao Yang and Tomer Galanti},
-      year={2025},
-      eprint={2506.04411},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG},
-      url={https://arxiv.org/abs/2506.04411}, 
+@inproceedings{luthra2025selfsupervised,
+  title={Self-Supervised Contrastive Learning is Approximately Supervised Contrastive Learning},
+  author={Luthra, Achleshwar and Yang, Tinabao and Galanti, Tomer},
+  booktitle={The Thirty-ninth Annual Conference on Neural Information Processing Systems},
+  year={2025},
+  url={https://openreview.net/forum?id=mf4V1SK0np}
 }
+
 ```
